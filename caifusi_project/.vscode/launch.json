@@ -1,0 +1,42 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "启动财赋思应用",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/launcher.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "DEV_MODE": "true",
+                "PYTHONIOENCODING": "utf-8"
+            }
+        },
+        {
+            "name": "仅启动后端",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/launcher.py",
+            "args": ["--backend-only"],
+            "console": "integratedTerminal",
+            "env": {
+                "DEV_MODE": "true",
+                "PYTHONIOENCODING": "utf-8",
+                "ZHIPUAI_API_KEY": "d569cc60785b4cd8a9cc3c033ac5a72f.MmbuHzbqGEsGntG5"
+            }
+        },
+        {
+            "name": "强制启动 (跳过检查)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/launcher.py",
+            "args": ["--skip-checks"],
+            "console": "integratedTerminal",
+            "env": {
+                "DEV_MODE": "true",
+                "PYTHONIOENCODING": "utf-8"
+            }
+        }
+    ]
+} 
