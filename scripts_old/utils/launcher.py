@@ -353,7 +353,7 @@ def start_backend():
     
     # 设置环境变量
     os.environ["DEV_MODE"] = "true"
-    os.environ["ZHIPUAI_API_KEY"] = "d569cc60785b4cd8a9cc3c033ac5a72f.MmbuHzbqGEsGntG5"
+    # ZHIPUAI_API_KEY must be provided by the environment; never hard-code credentials here.
     
     project_root = get_project_root()
     

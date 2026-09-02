@@ -11,7 +11,7 @@ set CPOLAR_PATH=E:\cpolar\cpolar\cpolar.exe
 
 echo [1/7] 设置环境变量...
 set DEV_MODE=true
-set ZHIPUAI_API_KEY=d569cc60785b4cd8a9cc3c033ac5a72f.MmbuHzbqGEsGntG5
+REM ZHIPUAI_API_KEY must be provided by the environment; never hard-code credentials here.
 set PUBLIC_IP=true
 
 REM 设置前端和后端端口，如果默认端口被占用可以修改这里
