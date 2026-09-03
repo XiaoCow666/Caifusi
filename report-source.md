@@ -61,7 +61,9 @@
 
 ## Star History 设计
 
-采用 [Star History](https://star-history.com/) 的动态 SVG，而不是手工写死当前 star 数。两个图表分别指向仓库路径，并链接到可交互历史页：
+初版采用 [Star History](https://star-history.com/) 的动态 SVG，而不是手工写死当前 star 数。发布后核验发现图表返回“GitHub restricted access to star data”错误页。Star History 官方在 2026-07-06 说明，GitHub 已限制公开 stargazers 时间线接口，托管服务无法代表普通仓库读取历史 star 数据。
+
+因此本次后续修订移除了两个 README 中的外部趋势图，只保留 GitHub 当前 star 徽章和原因说明，避免把第三方错误页展示给访客。若要恢复趋势图，应在仓库自己的 GitHub Actions 中采集并提交 SVG，或由仓库管理员按 Star History 官方流程配置有权限的 token；不能继续依赖无凭证的公共嵌入地址。
 
 - `https://api.star-history.com/svg?repos=XiaoCow666%2FCaifusi&type=Date`
 - `https://api.star-history.com/svg?repos=XiaoCow666%2FCodeSense&type=Date`
