@@ -2,16 +2,17 @@
   <img src="assets/brand/Caifusi-logo-wordmark-v1.png" alt="财赋思 Caifusi" width="480">
 </p>
 
+<h1 align="center">Caifusi 财赋思</h1>
+
 <p align="center">
-  <strong>你的 AI 金融心智教练</strong><br>
-  把金融知识变成更清醒、更适合自己的行动选择。
+  面向个人财务学习与复盘的 AI 辅助 Web 应用。
 </p>
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="#产品一览">查看截图</a> ·
-  <a href="#star-history">Star 趋势</a> ·
-  <a href="https://github.com/XiaoCow666/Caifusi/issues">反馈问题</a>
+  <a href="#页面预览">页面预览</a> ·
+  <a href="DEPLOYMENT_GUIDE.md">部署指南</a> ·
+  <a href="https://github.com/XiaoCow666/Caifusi/issues">提交 Issue</a>
 </p>
 
 <p align="center">
@@ -22,14 +23,27 @@
   <img src="https://img.shields.io/badge/Flask-3.x-000000?style=flat-square&logo=flask&logoColor=white" alt="Flask">
 </p>
 
-> 项目定位：面向个人财务成长的实验性产品。当前仓库适合本地体验、功能验证和产品迭代；完整 AI 能力需要自行配置后端服务与密钥。
+> 当前发布：<a href="https://github.com/XiaoCow666/Caifusi/releases/tag/v0.1.0"><code>v0.1.0</code></a>。
+>
+> 这个仓库目前适合本地体验、功能验证和产品迭代。AI 教练需要单独配置后端服务和 API 密钥。
 
-## 产品一览
+## 项目简介
 
-先看真实页面，再决定是否运行项目：
+Caifusi 是一个 React + Flask 应用，围绕个人财务学习、状态梳理和行动复盘提供几类工具：
+
+- 用问卷了解自己的风险偏好、习惯和当前财务状态；
+- 在金融知识库里查找基础概念；
+- 通过 AI 教练讨论问题，整理下一步行动；
+- 在 Dashboard 中查看预算、目标和进展。
+
+它用于金融教育和决策复盘，不替代投资、税务或法律专业意见。
+
+## 页面预览
+
+下面的图片来自当前项目页面。
 
 <p align="center">
-  <img src="assets/readme/caifusi-home.png" alt="财赋思首页：AI 金融心智教练" width="100%">
+  <img src="assets/readme/caifusi-home.png" alt="财赋思首页" width="100%">
 </p>
 
 <p align="center">
@@ -44,122 +58,114 @@
 </p>
 </details>
 
-## 它解决什么问题
+## 主要功能
 
-财务规划常常卡在三个地方：不知道自己处于什么状态、不知道下一步怎么做、知道了却很难坚持。Caifusi 把这条路径收进一个可持续迭代的产品闭环：
-
-| 模块 | 用户得到的结果 |
+| 功能 | 当前实现 |
 | --- | --- |
-| 金融心智评估 | 通过问卷梳理风险偏好、习惯与当前财务状态 |
-| AI 金融心智教练 | 围绕个人情况进行对话式解释与行动建议 |
+| 金融心智评估 | 通过问卷梳理风险偏好、习惯和财务状态 |
+| AI 金融心智教练 | 通过 Flask API 调用智谱 AI；Gemini 为可选接入 |
 | Dashboard | 查看财务健康、预算、目标和进展 |
-| 金融知识库 | 按主题搜索可读、可复习的基础知识 |
+| 金融知识库 | 按主题浏览和搜索基础金融知识 |
 
-### 三步开始
-
-1. 完成金融心智评估，先看见自己的起点。
-2. 获取更贴合当前情况的计划与建议。
-3. 在 Dashboard 和 AI 教练中持续复盘、调整和行动。
-
-## 功能地图
-
-- **公开内容**：首页、团队介绍、项目历程、金融知识库、FAQ、教程与使用说明。
-- **个人工作区**：Dashboard、评估结果、目标与进展。
-- **AI 交互**：通过 Flask API 连接智谱 GLM-4；Gemini 为可选集成。
-- **开发体验**：React 18 + Flask，前后端分离，开发态默认使用内存数据和 localStorage mock auth。
+默认开发状态还有两个边界：<code>AuthContext</code> 使用 mock auth，数据主要保存在内存或浏览器 <code>localStorage</code> 中。要接入真实账户和持久化数据，需要按部署环境配置 Firebase 或数据库服务。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js 18+
-- Python 3.8+
-- 若要使用 AI 教练：智谱 AI API Key（可选 Gemini Key）
-- 若要接入真实账户/数据：Firebase 配置或其他后端存储配置
+- Node.js 18 或更高版本；
+- Python 3.8 或更高版本；
+- AI 教练需要智谱 AI API Key，Gemini Key 可选；
+- Firebase 或其他后端存储按实际部署需求配置。
 
-### 1. 配置后端环境变量
+### 1. 配置后端环境
 
-在仓库根目录创建 `.env`，不要把真实密钥提交到 Git：
+在仓库根目录创建 <code>.env</code>，不要把真实密钥提交到 Git：
 
-```powershell
+~~~powershell
 Copy-Item .env.example .env
-```
+~~~
 
-至少填写 `ZHIPUAI_API_KEY` 和 `SECRET_KEY`；`GEMINI_API_KEY` 可选。前端如需使用 Firebase，再按 `src/firebase.js` 的变量名创建 `.env.local`。
+至少填写 <code>ZHIPUAI_API_KEY</code> 和 <code>SECRET_KEY</code>。如果要启用 Gemini，再填写 <code>GEMINI_API_KEY</code>。前端使用 Firebase 时，按 <code>src/firebase.js</code> 中的变量名创建 <code>.env.local</code>。
 
 ### 2. 安装依赖并启动
 
-```powershell
-# 终端 A：后端 API（http://localhost:5001）
+~~~powershell
+# 终端 A：后端 API
 python -m pip install -r backend/requirements.txt
 python backend/run_dev_enhanced.py
 
-# 终端 B：React 前端（http://localhost:3000）
+# 终端 B：React 前端
 npm install
 npm start
-```
+~~~
 
-Windows 也可以直接运行 [`快速启动.cmd`](快速启动.cmd)。这个一键脚本读取 `.env.local`；如果使用它，请先准备该文件。启动后打开 <http://localhost:3000>。
+后端默认地址是 <http://localhost:5001>，前端默认地址是 <http://localhost:3000>。Windows 也可以运行 [快速启动.cmd](快速启动.cmd)；这个脚本会读取 <code>.env.local</code>。
 
-### 3. 连接远程后端
+### 3. 连接远程 API
 
-本地开发默认代理到 `http://localhost:5001`。如果部署到 GitHub Pages 或其他静态托管平台，请在构建环境设置 `REACT_APP_API_URL`，并让后端 CORS 允许前端域名；否则首页等静态页面可以展示，AI 教练无法连通。
+开发环境会把 API 请求代理到 <code>http://localhost:5001</code>。如果前端部署到 GitHub Pages 或其他静态托管平台，构建时设置 <code>REACT_APP_API_URL</code>，并在后端的 <code>CORS_ALLOWED_ORIGINS</code> 中加入前端域名。没有远程 API 时，公开静态页面仍可以打开，但 AI 教练不能正常工作。
 
 ## 部署路线
 
-| 目标 | 推荐方式 | 关键点 |
+| 目标 | 方式 | 说明 |
 | --- | --- | --- |
-| 只展示前端 | GitHub Pages `/docs` | 构建时使用 `PUBLIC_URL=.`，发布 `build/` 内容；不包含后端能力 |
-| 完整产品体验 | 静态前端 + 独立 Flask API | API 使用 HTTPS，配置 `REACT_APP_API_URL` 和 `CORS_ALLOWED_ORIGINS` |
-| 单机试点 | Nginx + Gunicorn + MySQL/Firebase | 后端只绑定本机端口，生产环境关闭开发服务器和默认密钥 |
+| 只展示前端 | GitHub Pages <code>/docs</code> | 发布静态构建产物，不包含后端和 AI 能力 |
+| 完整产品体验 | 静态前端 + Flask API | API 使用 HTTPS，并配置 <code>REACT_APP_API_URL</code> 和 CORS |
+| 单机试点 | Nginx + Gunicorn + MySQL/Firebase | 后端只监听本机端口，关闭开发服务器和默认密钥 |
 
-完整的 Pages、Gunicorn、Systemd、Nginx、HTTPS、数据库和故障排查步骤见 [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)。
+Pages、Gunicorn、Systemd、Nginx、HTTPS、数据库和故障排查步骤见 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)。
 
 ## 技术结构
 
-```mermaid
+~~~mermaid
 flowchart LR
     User[用户] --> Web[React 18 + HashRouter]
     Web --> API[Flask API :5001]
     API --> AI[智谱 GLM-4 / Gemini]
     API --> Store[Memory / MySQL / Firebase]
-```
+~~~
 
 | 层 | 当前实现 |
 | --- | --- |
 | Web | React 18、React Router、Bootstrap、Tailwind、React Icons |
 | API | Flask、Flask-CORS、python-dotenv |
 | AI | 智谱 AI GLM-4；Gemini 可选 |
-| 数据 | 开发态内存数据；可配置 MySQL / Firebase |
+| 数据 | 开发态内存数据；可配置 MySQL 或 Firebase |
 
-## 使用边界与安全
+## 安全与使用边界
 
-- 当前 `AuthContext` 是开发态 mock auth，适合演示和本地开发，不应直接视为生产级账户系统。
-- 不要在 README、截图、Issue 或提交记录中暴露 API Key、Firebase 私钥或数据库凭据。
-- GitHub Pages 只承载前端静态资源；完整 AI 体验需要一个可访问且正确配置 CORS 的后端。
-- Caifusi 用于金融教育与决策复盘，不构成投资、税务、法律或其他专业意见；重要决定请咨询持牌专业人士。
-- 详细密钥配置见 [`SECURITY_SETUP.md`](SECURITY_SETUP.md)，部署说明见 [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)。
+- 当前认证流程是开发态 mock auth，不应直接用于正式账户系统。
+- 不要把 API Key、Firebase 私钥或数据库凭据放进 README、截图、Issue 或提交记录。
+- GitHub Pages 只提供静态前端；完整 AI 功能需要一个可访问、且正确配置 CORS 的后端。
+- Caifusi 用于金融教育和个人复盘，不构成投资、税务、法律或其他专业建议。重要决定请咨询持牌专业人士。
+
+密钥配置见 [SECURITY_SETUP.md](SECURITY_SETUP.md)，部署说明见 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)。
 
 ## 文档入口
 
-| 需求 | 文档 |
+| 需要了解的内容 | 文档 |
 | --- | --- |
-| 第一次使用 | [`使用说明.md`](使用说明.md) |
-| 部署前端/后端 | [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) |
-| 配置密钥 | [`SECURITY_SETUP.md`](SECURITY_SETUP.md) |
-| 启动异常排查 | [`启动问题排查.md`](启动问题排查.md) |
-| 智谱 API 配置 | [`docs/智谱API密钥获取与配置指南.md`](docs/智谱API密钥获取与配置指南.md) |
+| 第一次使用 | [使用说明.md](使用说明.md) |
+| 部署前端和后端 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) |
+| 配置密钥 | [SECURITY_SETUP.md](SECURITY_SETUP.md) |
+| 启动异常排查 | [启动问题排查.md](启动问题排查.md) |
+| 智谱 API 配置 | [docs/智谱API密钥获取与配置指南.md](docs/智谱API密钥获取与配置指南.md) |
+
+## 发布
+
+当前公开版本是 [v0.1.0](https://github.com/XiaoCow666/Caifusi/releases/tag/v0.1.0)。后续发布会在 GitHub Release 中记录，并同步更新项目文档。
 
 ## Star History
 
-顶部徽章显示仓库当前的 star 数。历史趋势图暂不以内嵌图片形式展示：GitHub 已收紧公开 stargazers 时间线接口，Star History 官方说明托管图表可能因此返回错误页。为了让 README 保持可靠，这里不把错误页当成趋势图素材；后续如需趋势图，将改为仓库自有的 Actions 产物。
+顶部徽章显示当前 star 数。这里没有嵌入第三方历史图，因为 GitHub 对公开 stargazers 时间线接口的限制会让 Star History 返回错误页面。等仓库自己的趋势数据生成流程准备好后，再把图放回 README。
 
-- [查看 Caifusi 当前仓库](https://github.com/XiaoCow666/Caifusi)
+- [查看 Caifusi 仓库](https://github.com/XiaoCow666/Caifusi)
 - [Star History 官方说明](https://www.star-history.com/blog/github-stargazer-api-restriction/)
 
-## 参与项目
+## 参与贡献
 
-欢迎通过 [Issues](https://github.com/XiaoCow666/Caifusi/issues) 提交体验反馈、产品想法和可复现的问题；提交代码前请说明变更动机、验证方式以及是否涉及密钥或数据结构。
+欢迎通过 [Issues](https://github.com/XiaoCow666/Caifusi/issues) 提交体验反馈、产品想法和可复现的问题。提交代码前，请在 Pull Request 中说明改动原因、验证方式，以及是否涉及密钥或数据结构。
 
 ## License
 
