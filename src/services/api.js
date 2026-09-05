@@ -182,55 +182,39 @@ export const fetchAssessmentResults = async (userId) => {
  * @param {object} data - 包含消息内容、用户ID、聊天历史和评估结果的对象
  * @returns {Promise} 返回AI回复
  */
+
 export const sendMessageToCoach = async (data) => {
   try {
-    // 使用通用请求函数来处理请求
-    console.log('发送消息到AI教练:', data);
-    
-    // 根据环境选择正确的 API 基础 URL
-    let baseUrl;
-    if (isGitHubPages) {
-      baseUrl = process.env.REACT_APP_API_URL || 'https://你的API服务器地址';
-    } else if (process.env.NODE_ENV === 'production') {
-      baseUrl = process.env.REACT_APP_API_URL || '';
-    } else {
-      baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5001';
-    }
-    
-    const url = `${baseUrl}/api/coach/chat`;
-    console.log('请求 URL:', url);
-    
-    // 发送请求
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('AI教练响应错误:', response.status, errorText);
-      throw new Error(`服务器响应错误: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    console.log('AI教练响应:', result);
-    
+    // 统一走 axios.create 实例 api：自动继承 baseURL（已含 /api，路径不再拼 /api）、拦截器等全局配置
+    const response = await api.post('/coach/chat', data);
+    const result = response.data;
+
+    // 后端返回 success/error 业务包络：不能仅凭 HTTP 200 判定成功
     if (result.status === 'success') {
       return { reply: result.reply };
-    } else {
-      throw new Error(result.message || '获取回复失败');
     }
+
+    // HTTP 200 但业务包络为 error（防御未来网关吞错 / 接口变更）
+    throw new Error(result.message || '获取回复失败');
   } catch (error) {
     console.error('AI教练请求错误:', error);
-    // 提供更友好的错误信息
-    if (error.message.includes('无法连接到服务器') || error.message === 'Failed to fetch') {
+
+    // 优先取后端 4xx/5xx 响应体中的中文 message（axios 错误对象自带 error.response），兜底取错误信息
+    const errorMsg =
+      (error.response && error.response.data && error.response.data.message) ||
+      error.message ||
+      'AI教练暂时无法回复，请稍后再试';
+
+    // 网络错误 / 后端未启动：与旧实现文案语义一致
+    if (
+      errorMsg.includes('无法连接到服务器') ||
+      errorMsg === 'Failed to fetch' ||
+      errorMsg === 'Network Error'
+    ) {
       throw new Error('无法连接到AI教练服务，请确认后端服务已启动');
-    } else {
-      throw new Error(`AI教练回复错误: ${error.message}`);
     }
+
+    throw new Error(`AI教练回复错误: ${errorMsg}`);
   }
 };
 
