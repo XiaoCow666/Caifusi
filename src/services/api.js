@@ -1,3 +1,44 @@
+/**
+ * ============================================================
+ * 财赋思前端 HTTP 请求服务层（api.js）使用规范
+ * ============================================================
+ *
+ * 【唯一正确用法】所有 HTTP 请求必须使用下方 axios.create() 创建的 api 实例：
+ *     import { api, loginUser, submitAssessment } from '../services/api';
+ *     // 或直接调用已封装好的具名导出函数（推荐，见文件底部 apiService）
+ *     const res = await loginUser({ email, password });
+ *
+ * 【强制禁止】❌ 不要在本项目任何 .js/.jsx 文件中新写原生 fetch() 或新的 fetch 封装！
+ *     错误写法：fetch('http://localhost:5001/api/xxx', {...})  ← 会造成配置不同步
+ *     替代写法：await api.post('/xxx', body) / await api.get('/xxx')
+ *
+ * 【路径规则】api 实例的 baseURL 已含 /api（见 API_BASE_URL），请求 path 一律不带 /api：
+ *     api.post('/coach/chat')          ✅
+ *     api.post('/api/coach/chat')      ❌ 会得到 /api/api/coach/chat
+ *
+ * 【业务包络】后端接口统一返回 { status: 'success' | 'error', ... } 包络，
+ *     不能仅凭 HTTP 200 判定成功，须校验 response.data.status === 'success'
+ *     （参考 sendMessageToCoach 的写法）。
+ *
+ * 【全局配置位置】公共配置统一修改下方 axios.create() 参数块与拦截器，改 1 处全局生效：
+ *     - baseURL：API_BASE_URL（本地开发 = http://localhost:5001/api；GitHub Pages /
+ *       自定义域名走 REACT_APP_API_URL）
+ *     - JWT 认证头：请求拦截器（localStorage 读取 authToken）
+ *     - 401 登出 / 统一错误文案：响应拦截器（当前仅处理 401；如需超时/重试统一加在这里）
+ *
+ * 【新增接口规范】新增接口调用按以下模板写（对齐 submitAssessment 风格）：
+ *     export const getXxxData = async (params) => {
+ *       const res = await api.get('/xxx/data', { params }); // path 不拼 /api
+ *       return res.data;
+ *     };
+ *
+ * 【历史说明】本文件曾存在 fetchApi() 原生 fetch 封装（全仓 0 调用死代码）与
+ *             sendMessageToCoach 内联 fetch（硬编码 localhost + '/api/coach/chat' 路径），
+ *             已于 STAGE2-ISSUE-001 PR（refactor/api-request-unify 分支）迁移删除。
+ *             如发现代码中仍残留 fetch( 关键字或新写的 fetch 封装，请提 Issue 或直接发 PR
+ *             迁移到 axios 实例。
+ * ============================================================
+ */
 import axios from 'axios';
 
 // 这里是API服务模块，用于处理与后端的通信
