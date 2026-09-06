@@ -3,10 +3,13 @@
  * 财赋思前端 HTTP 请求服务层（api.js）使用规范
  * ============================================================
  *
- * 【唯一正确用法】所有 HTTP 请求必须使用下方 axios.create() 创建的 api 实例：
- *     import { api, loginUser, submitAssessment } from '../services/api';
- *     // 或直接调用已封装好的具名导出函数（推荐，见文件底部 apiService）
- *     const res = await loginUser({ email, password });
+ * 【唯一正确用法】所有 HTTP 请求必须统一走下方 axios.create() 创建的 api 实例，
+ *   但该实例仅供本文件内部使用（模块私有、未 export，外部 import 会构建报错）：
+ *     外部调用只能 import 本文件具名导出函数，或默认导出 apiService（文件底部已聚合全部接口）：
+ *       import apiService, { sendMessageToCoach } from '../services/api';
+ *       const res = await apiService.loginUser({ email, password });
+ *     新增接口 = 在本文件内按下文【新增接口规范】模板新写封装函数后具名导出；
+ *     下文示例中的 api.xxx() 均指本文件内部写法。
  *
  * 【强制禁止】❌ 不要在本项目任何 .js/.jsx 文件中新写原生 fetch() 或新的 fetch 封装！
  *     错误写法：fetch('http://localhost:5001/api/xxx', {...})  ← 会造成配置不同步
