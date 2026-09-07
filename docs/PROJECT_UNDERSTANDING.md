@@ -311,7 +311,9 @@ Compiled successfully!
 
 > ⚠️ **验证方式说明**：以下实测为**手动选择性安装核心依赖**后的运行结果，**不是**执行原始 `pip install -r backend/requirements.txt` 全量安装的结果。该实测验证了「核心依赖子集可运行」，但**不能证明原始安装流程已修复**，也不能替代 §6 中要求的干净环境全量验证。
 
-**依赖安装方式（手动选择，非原始 requirements.txt）：** 仅安装核心依赖（flask、flask-cors、zhipuai、sniffio、PyMySQL 等），跳过可选的 firebase-admin / gunicorn / google-generativeai，安装成功无报错。精确安装命令及各包版本待补充。
+**依赖安装方式（手动选择，非原始 requirements.txt — 不可复现）：** 当时手动选择性安装了部分核心依赖（包括 flask、flask-cors、zhipuai、sniffio、PyMySQL 等，列表不完整），跳过了 firebase-admin / gunicorn / google-generativeai，安装过程无报错。
+
+> ⚠️ **可复现性声明**：该次手动安装的**精确命令、pip 版本、各包最终版本号均未留存记录**，且依赖列表使用"等"省略了实际安装的完整集合。因此以下 API 实测结果**仅为历史观察记录，不构成可复现的验证证据**，也无法据此判断 sniffio 缺失是来自原始依赖声明还是手动安装过程。如需可复现验证，请按 §6「验证方式」中的场景 A 在干净环境中重新执行。
 
 **后端启动关键日志：**
 ```
@@ -363,7 +365,7 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
 | R5 | **重复代码目录** | 低 | `backend/app/services/` 和 `backend/services/`、`backend/app/routes/` 和 `backend/routes/` 并存，代码维护混乱 | 目录结构观察 |
 | R6 | **多个启动脚本并存** | 低 | `run.py`、`run_dev.py`、`run_dev_enhanced.py`、`run_dev_fixed.py` 四个启动入口，职责不清晰 | 目录结构观察 |
 | R7 | **前端 API 地址硬编码占位符** | 低 | `src/services/api.js` 中 GitHub Pages 环境的 API 地址硬编码为 `'https://你的API服务器地址'` | 代码阅读 |
-| R8 | **gunicorn 不支持 Windows** | 低 | `requirements.txt` 包含 `gunicorn`，但 gunicorn 是 Unix-only，Windows 上无法安装使用 | 常识 + requirements.txt |
+| R8 | **gunicorn 不支持 Windows 运行** | 低 | `requirements.txt` 包含 `gunicorn`，而 gunicorn 官方仅支持 Unix 类系统运行；**但"放入默认依赖会导致 Windows 上 pip install 失败"尚未有直接报错证据**，当前观察到的 Windows 安装故障为 `resolution-too-deep`，未指向 gunicorn | 运行限制：gunicorn 官方文档 + requirements.txt；安装失败：待验证 |
 
 ### 5.1.1 观察到的依赖故障现象（根因待确认）
 
@@ -398,7 +400,7 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
 
 1. **观察到的现象（根因待确认）**：在 Windows 10 / Python 3.14 上完整执行 `pip install -r backend/requirements.txt` 出现 `error: resolution-too-deep`。推测可能与 `firebase-admin>=6.5.0` 的依赖图有关，但未通过单独安装复现，不能排除其他依赖组合触发。
 2. **观察到的现象（根因待确认）**：后端首次启动时出现 `ModuleNotFoundError: No module named 'sniffio'`。推测 `zhipuai` SDK 依赖 `sniffio` 但顶层 `requirements.txt` 未显式声明；但同一环境下 `zhipuai` 安装时是否已隐式拉取 `sniffio` 尚未验证，两种可能性未区分。
-3. **已确认的设计问题**：`gunicorn` 是 Unix-only 软件包，放入默认 `requirements.txt` 会导致 Windows 用户安装失败；`firebase-admin` 和 `google-generativeai` 属于可选功能依赖，不应阻塞核心功能安装。
+3. **已确认的设计问题（运行限制）**：`gunicorn` 官方仅支持 Unix 类系统运行，放入默认 `requirements.txt` 意味着 Windows 用户即使安装成功也无法在本地运行 gunicorn；**但"放入默认依赖会导致 Windows 上 pip install 直接失败"尚未有独立报错证据**，当前观察到的 Windows 安装故障为 `resolution-too-deep`，未指向 gunicorn。此外，`firebase-admin` 和 `google-generativeai` 属于可选功能依赖，不应阻塞核心功能安装。
 
 #### 改进方案
 
