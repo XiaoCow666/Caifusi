@@ -19,9 +19,12 @@
  *     api.post('/coach/chat')          ✅
  *     api.post('/api/coach/chat')      ❌ 会得到 /api/api/coach/chat
  *
- * 【业务包络】后端接口统一返回 { status: 'success' | 'error', ... } 包络，
- *     不能仅凭 HTTP 200 判定成功，须校验 response.data.status === 'success'
- *     （参考 sendMessageToCoach 的写法）。
+ * 【业务包络】后端接口"成功/失败"分两种约定，新增封装前先确认目标接口属于哪种：
+ *   · 返回 { status: 'success' | 'error', message, ... } 包络的接口（如 /coach/chat、
+ *     /dashboard/*）：不能仅凭 HTTP 200 判定成功——须校验 response.data.status === 'success'，
+ *     error 时抛后端 message（完整写法见 sendMessageToCoach）；
+ *   · 以 HTTP 状态码表达失败的接口（如 /assessment/*、/auth/* 的 4xx/5xx）：非 2xx 会由
+ *     axios 抛错并进入响应拦截器，2xx 直接返回数据即可。
  *
  * 【全局配置位置】公共配置统一修改下方 axios.create() 参数块与拦截器，改 1 处全局生效：
  *     - baseURL：API_BASE_URL（本地开发 = http://localhost:5001/api；GitHub Pages /
@@ -34,6 +37,9 @@
  *       const res = await api.get('/xxx/data', { params }); // path 不拼 /api
  *       return res.data;
  *     };
+ *   ⚠️ 模板仅覆盖"HTTP 状态码表达失败"类接口；若新接口属上方"success/error 包络"类
+ *     （如 /coach/chat、/dashboard/*），必须在 return 前校验 status 并抛后端 message——
+ *     不要让 HTTP 200 + {status:'error'} 静默通过（照抄 sendMessageToCoach 的包络分支即可）。
  *
  * 【历史说明】本文件曾存在 fetchApi() 原生 fetch 封装（全仓 0 调用死代码）与
  *             sendMessageToCoach 内联 fetch（硬编码 localhost + '/api/coach/chat' 路径），
