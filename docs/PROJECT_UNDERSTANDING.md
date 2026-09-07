@@ -538,13 +538,24 @@ pip install -r backend\requirements.txt
 
 **场景 C：生产环境验证 gunicorn 可选安装**
 ```bash
+# 新建独立虚拟环境（不可复用场景 A/B 的环境，避免前序安装残留）
+python -m venv venv-prod
+source venv-prod/bin/activate  # Windows: venv-prod\Scripts\activate
+
 # Linux 生产环境
 pip install -r backend/requirements.txt -r backend/requirements-prod.txt
 gunicorn --version  # 确认已安装
 ```
 
-**场景 D：可选依赖独立安装验证**
+**场景 D：可选依赖独立安装验证（必须使用全新干净环境）**
 ```bash
+# ⚠️ 必须新建独立虚拟环境，不可复用场景 C 的环境（场景 C 已安装 gunicorn）
+python -m venv venv-firebase
+source venv-firebase/bin/activate  # Windows: venv-firebase\Scripts\activate
+
+# 安装前确认 gunicorn 不存在（基线检查）
+pip list | grep -i gunicorn  # 应为空；若非空说明环境不干净，需重建
+
 # 验证 Firebase 可选文件不引入 gunicorn
 pip install -r backend/requirements.txt -r backend/requirements-firebase.txt
 pip list | grep -i gunicorn  # 应为空
@@ -560,31 +571,57 @@ pip list | grep -i gunicorn  # 应为空
 python -m venv venv-original
 source venv-original/bin/activate
 
-# 2. 安装原始（未修改的）requirements.txt，记录完整输出
+# 2. 安装原始（未修改的）requirements.txt，记录完整输出和退出状态
 pip install -r backend/requirements.txt 2>&1 | tee install_log.txt
+INSTALL_EXIT_CODE=$?
 
-# 3. 记录实际安装的 zhipuai 版本及完整传递依赖树
+# 3. ⚠️ 安装成功前置检查：必须安装成功后才能继续归因
+#    若退出码非 0（如出现 resolution-too-deep），则环境不完整，
+#    停止 sniffio 缺失归因，单独记录为依赖解析故障，跳至步骤 3b
+if [ $INSTALL_EXIT_CODE -ne 0 ]; then
+  echo "安装失败（退出码 $INSTALL_EXIT_CODE），环境不完整，不进行 sniffio 缺失归因"
+  echo "需单独排查依赖解析故障（见 install_log.txt）"
+  exit 1
+fi
+
+# 3a. 安装成功：启动后端，复现 sniffio 缺失异常（需捕获完整堆栈）
+python backend/run_dev_enhanced.py 2>&1 | tee startup_log.txt
+#    若出现 ModuleNotFoundError: No module named 'sniffio'，记录完整 traceback
+#    若未出现异常，则 sniffio 缺失问题不可复现，需重新确认原始报错场景
+
+# 3b. （仅当步骤 2 安装失败时执行）记录解析故障详情，不继续后续归因
+echo "依赖解析故障，退出码: $INSTALL_EXIT_CODE"
+grep -i "error\|resolution" install_log.txt | head -20
+exit 1
+
+# 4. 记录实际安装的 zhipuai 版本及完整传递依赖树
 pip show zhipuai
 pip install pipdeptree
 pipdeptree -p zhipuai  # 查看 zhipuai 的完整传递依赖，确认 sniffio 是否在其中
 
-# 4. 检查 sniffio 是否实际被安装（可能由其他间接依赖引入）
+# 5. 检查 sniffio 是否实际被安装（可能由其他间接依赖引入）
 pip show sniffio
 python -c "import sniffio; print('sniffio available')" 2>&1
 
-# 5. 若 sniffio 未安装，确认是哪个环节缺失：
-#    - zhipuai 的 Requires 字段是否声明 sniffio？
-#    - 若 zhipuai 未声明，是否有其他包传递引入了 sniffio？
-#    - 若都没有，则确认原始 requirements.txt 确实缺少 sniffio 声明
+# 6. 结合启动异常堆栈和依赖树判断缺失来源：
+#    - 若启动报 ModuleNotFoundError 且 pip show sniffio 未安装：
+#      检查 zhipuai 的 Requires 字段是否声明 sniffio？
+#      若 zhipuai 未声明，是否有其他包传递引入了 sniffio？
+#      若都没有，则确认原始 requirements.txt 确实缺少 sniffio 声明
+#    - 若启动未报异常但 pip show sniffio 已安装：
+#      确认是哪个包作为直接/间接依赖引入了 sniffio，原始缺失可能来自其他安装方式
 ```
 
 **根因验证需记录的信息：**
 - Python 版本、pip 版本
-- 原始 `requirements.txt` 安装的完整包列表及版本（`pip freeze`）
+- `pip install` 退出码（0=成功，非0=解析故障）
+- 若安装失败：完整错误日志（`install_log.txt`），单独记录为依赖解析故障，不进行 sniffio 归因
+- 若安装成功：完整包列表及版本（`pip freeze`）
+- 启动后端的完整输出（`startup_log.txt`），是否复现 `ModuleNotFoundError` 及完整 traceback
 - `pipdeptree -p zhipuai` 的完整输出
 - `pip show sniffio` 的结果（已安装/未安装）
 - 若已安装，是哪个包作为直接/间接依赖引入的
-- 若未安装，确认 `zhipuai>=2.1.5` 的 `Requires` 字段是否包含 sniffio
+- 若未安装且启动复现异常，确认 `zhipuai>=2.1.5` 的 `Requires` 字段是否包含 sniffio
 
 #### 预期收益（待验证后确认）
 
