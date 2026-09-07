@@ -1,3 +1,53 @@
+/**
+ * ============================================================
+ * 财赋思前端 HTTP 请求服务层（api.js）使用规范
+ * ============================================================
+ *
+ * 【唯一正确用法】所有 HTTP 请求必须统一走下方 axios.create() 创建的 api 实例，
+ *   但该实例仅供本文件内部使用（模块私有、未 export，外部 import 会构建报错）：
+ *     外部调用只能 import 本文件具名导出函数，或默认导出 apiService（文件底部已聚合全部接口）：
+ *       import apiService, { sendMessageToCoach } from '../services/api';
+ *       const res = await apiService.loginUser({ email, password });
+ *     新增接口 = 在本文件内按下文【新增接口规范】模板新写封装函数后具名导出；
+ *     下文示例中的 api.xxx() 均指本文件内部写法。
+ *
+ * 【强制禁止】❌ 不要在本项目任何 .js/.jsx 文件中新写原生 fetch() 或新的 fetch 封装！
+ *     错误写法：fetch('http://localhost:5001/api/xxx', {...})  ← 会造成配置不同步
+ *     替代写法：await api.post('/xxx', body) / await api.get('/xxx')
+ *
+ * 【路径规则】api 实例的 baseURL 已含 /api（见 API_BASE_URL），请求 path 一律不带 /api：
+ *     api.post('/coach/chat')          ✅
+ *     api.post('/api/coach/chat')      ❌ 会得到 /api/api/coach/chat
+ *
+ * 【业务包络】后端接口"成功/失败"分两种约定，新增封装前先确认目标接口属于哪种：
+ *   · 返回 { status: 'success' | 'error', message, ... } 包络的接口（如 /coach/chat、
+ *     /dashboard/*）：不能仅凭 HTTP 200 判定成功——须校验 response.data.status === 'success'，
+ *     error 时抛后端 message（完整写法见 sendMessageToCoach）；
+ *   · 以 HTTP 状态码表达失败的接口（如 /assessment/*、/auth/* 的 4xx/5xx）：非 2xx 会由
+ *     axios 抛错并进入响应拦截器，2xx 直接返回数据即可。
+ *
+ * 【全局配置位置】公共配置统一修改下方 axios.create() 参数块与拦截器，改 1 处全局生效：
+ *     - baseURL：API_BASE_URL（本地开发 = http://localhost:5001/api；GitHub Pages /
+ *       自定义域名走 REACT_APP_API_URL）
+ *     - JWT 认证头：请求拦截器（localStorage 读取 authToken）
+ *     - 401 登出 / 统一错误文案：响应拦截器（当前仅处理 401；如需超时/重试统一加在这里）
+ *
+ * 【新增接口规范】新增接口调用按以下模板写（对齐 submitAssessment 风格）：
+ *     export const getXxxData = async (params) => {
+ *       const res = await api.get('/xxx/data', { params }); // path 不拼 /api
+ *       return res.data;
+ *     };
+ *   ⚠️ 模板仅覆盖"HTTP 状态码表达失败"类接口；若新接口属上方"success/error 包络"类
+ *     （如 /coach/chat、/dashboard/*），必须在 return 前校验 status 并抛后端 message——
+ *     不要让 HTTP 200 + {status:'error'} 静默通过（照抄 sendMessageToCoach 的包络分支即可）。
+ *
+ * 【历史说明】本文件曾存在 fetchApi() 原生 fetch 封装（全仓 0 调用死代码）与
+ *             sendMessageToCoach 内联 fetch（硬编码 localhost + '/api/coach/chat' 路径），
+ *             已于 STAGE2-ISSUE-001 PR（refactor/api-request-unify 分支）迁移删除。
+ *             如发现代码中仍残留 fetch( 关键字或新写的 fetch 封装，请提 Issue 或直接发 PR
+ *             迁移到 axios 实例。
+ * ============================================================
+ */
 import axios from 'axios';
 
 // 这里是API服务模块，用于处理与后端的通信
@@ -47,80 +97,6 @@ api.interceptors.response.use(
   }
 );
 
-// 通用请求函数
-async function fetchApi(endpoint, options = {}) {
-  // 根据环境选择API基础URL
-  let baseUrl;
-  
-  // 在GitHub Pages环境中使用外部API服务
-  if (isGitHubPages) {
-    baseUrl = 'https://你的API服务器地址';  // 替换为你的实际API服务地址
-    // 注意: 外部API服务需要配置CORS允许GitHub Pages域名访问
-  } else if (process.env.NODE_ENV === 'production') {
-    baseUrl = '';  // 在其他生产环境中使用相对路径
-  } else {
-    baseUrl = 'http://localhost:5001';  // 开发环境
-  }
-  
-  // 确保endpoint格式正确
-  const formattedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${baseUrl}/api${formattedEndpoint}`;
-  
-  // 默认配置
-  const defaultOptions = {
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    // 添加跨域支持
-    credentials: 'include',
-    mode: 'cors',
-  };
-  
-  // 合并配置
-  const fetchOptions = {
-    ...defaultOptions,
-    ...options,
-  };
-  
-  console.log(`正在请求API: ${url}`, options.method || 'GET');
-  
-  try {
-    const response = await fetch(url, fetchOptions);
-    
-    // 非2xx状态码
-    if (!response.ok) {
-      console.error(`API错误: ${response.status}`, response);
-      // 尝试解析错误响应
-      let errorMessage;
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.message || errorData.error || `请求失败，状态码: ${response.status}`;
-      } catch (e) {
-        errorMessage = `请求失败，状态码: ${response.status}`;
-      }
-      throw new Error(errorMessage);
-    }
-    
-    // 尝试解析JSON响应
-    try {
-    const data = await response.json();
-    console.log(`API响应:`, data);
-    return data;
-    } catch (e) {
-      // 处理非JSON响应
-      console.log('API响应不是JSON格式');
-      return { status: 'success', message: '请求成功但返回非JSON格式' };
-    }
-  } catch (error) {
-    console.error('API请求错误:', error);
-    // 友好错误信息
-    if (error.message === 'Failed to fetch') {
-      console.error('无法连接到服务器，请确认后端服务已启动');
-      error.message = '无法连接到服务器，请确认后端服务已启动';
-    }
-    throw error;
-  }
-}
 
 // 示例：注册用户
 export const registerUser = async (userData) => {
@@ -182,55 +158,39 @@ export const fetchAssessmentResults = async (userId) => {
  * @param {object} data - 包含消息内容、用户ID、聊天历史和评估结果的对象
  * @returns {Promise} 返回AI回复
  */
+
 export const sendMessageToCoach = async (data) => {
   try {
-    // 使用通用请求函数来处理请求
-    console.log('发送消息到AI教练:', data);
-    
-    // 根据环境选择正确的 API 基础 URL
-    let baseUrl;
-    if (isGitHubPages) {
-      baseUrl = process.env.REACT_APP_API_URL || 'https://你的API服务器地址';
-    } else if (process.env.NODE_ENV === 'production') {
-      baseUrl = process.env.REACT_APP_API_URL || '';
-    } else {
-      baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5001';
-    }
-    
-    const url = `${baseUrl}/api/coach/chat`;
-    console.log('请求 URL:', url);
-    
-    // 发送请求
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('AI教练响应错误:', response.status, errorText);
-      throw new Error(`服务器响应错误: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    console.log('AI教练响应:', result);
-    
+    // 统一走 axios.create 实例 api：自动继承 baseURL（已含 /api，路径不再拼 /api）、拦截器等全局配置
+    const response = await api.post('/coach/chat', data);
+    const result = response.data;
+
+    // 后端返回 success/error 业务包络：不能仅凭 HTTP 200 判定成功
     if (result.status === 'success') {
       return { reply: result.reply };
-    } else {
-      throw new Error(result.message || '获取回复失败');
     }
+
+    // HTTP 200 但业务包络为 error（防御未来网关吞错 / 接口变更）
+    throw new Error(result.message || '获取回复失败');
   } catch (error) {
     console.error('AI教练请求错误:', error);
-    // 提供更友好的错误信息
-    if (error.message.includes('无法连接到服务器') || error.message === 'Failed to fetch') {
+
+    // 优先取后端 4xx/5xx 响应体中的中文 message（axios 错误对象自带 error.response），兜底取错误信息
+    const errorMsg =
+      (error.response && error.response.data && error.response.data.message) ||
+      error.message ||
+      'AI教练暂时无法回复，请稍后再试';
+
+    // 网络错误 / 后端未启动：与旧实现文案语义一致
+    if (
+      errorMsg.includes('无法连接到服务器') ||
+      errorMsg === 'Failed to fetch' ||
+      errorMsg === 'Network Error'
+    ) {
       throw new Error('无法连接到AI教练服务，请确认后端服务已启动');
-    } else {
-      throw new Error(`AI教练回复错误: ${error.message}`);
     }
+
+    throw new Error(`AI教练回复错误: ${errorMsg}`);
   }
 };
 
