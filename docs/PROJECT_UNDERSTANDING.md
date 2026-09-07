@@ -4,6 +4,8 @@
 > 代码基线：本地 `main` 与 `origin/main` 对齐，HEAD 为 `2a4dddc`。
 > 变更性质：仅文档；不修改业务逻辑，不提交密钥。
 
+本文关键源码证据均固定到基线提交 [`2a4dddc2fe542e11a46105d20b35594f5d24ff18`](https://github.com/XiaoCow666/Caifusi/commit/2a4dddc2fe542e11a46105d20b35594f5d24ff18) 的 GitHub permalink；未带链接的文件名仅用于目录导航。
+
 ## 结论摘要
 
 Caifusi（财赋思）是一个面向个人财务学习、状态梳理和行动复盘的 React + Flask Web 应用。产品表面上由四条能力组成：金融心智评估、AI 金融心智教练、Dashboard 和金融知识内容；README 也明确说明它不替代投资、税务或法律专业意见。
@@ -40,12 +42,12 @@ README 将项目定位为“面向个人财务学习与复盘的 AI 辅助 Web �
 
 | 目录/文件 | 职责与证据 |
 | --- | --- |
-| `src/index.js`、`src/App.js` | React 入口、`HashRouter`、全局 `AuthProvider`、公共/受保护路由；见 `src/index.js:1-15`、`src/App.js:102-150`。 |
-| `src/contexts/AuthContext.js` | 开发态登录/注册/登出和用户资料状态；生成 `dev-user-*`，并写入 `localStorage`；见 `src/contexts/AuthContext.js:18-90`、`:100-141`。 |
+| [`src/index.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/index.js#L1-L15)、[`src/App.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/App.js#L102-L150) | React 入口、`HashRouter`、全局 `AuthProvider`、公共/受保护路由。 |
+| [`src/contexts/AuthContext.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/contexts/AuthContext.js#L18-L141) | 开发态登录/注册/登出和用户资料状态；生成 `dev-user-*`，并写入 `localStorage`。 |
 | `src/pages/` | 页面层：Home、Login、Register、Assessment、Dashboard、CoachChat、NotFound，以及 `info/` 下的团队/知识/FAQ/教程/法律等内容页。 |
-| `src/services/api.js` | axios 请求拦截器、通用 `fetch`、健康检查、教练、评估和 Dashboard API 封装；见 `src/services/api.js:13-48`、`:185-245`、`:247-370`。 |
+| [`src/services/api.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/services/api.js#L13-L48) | axios 请求拦截器、通用 `fetch`、健康检查、教练、评估和 Dashboard API 封装；教练/业务 API 见同一文件的 `185-370` 行。 |
 | `src/firebase.js`、`src/services/firebase.js` | Firebase Web 配置入口；配置来自 `REACT_APP_*` 环境变量。 |
-| `backend/app/__init__.py` | Flask app factory、CORS、蓝图注册和 `/api/health`；见 `backend/app/__init__.py:6-134`。 |
+| [`backend/app/__init__.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/__init__.py#L6-L134) | Flask app factory、CORS、蓝图注册和 `/api/health`。 |
 | `backend/app/routes/` | HTTP 层：`coach_routes.py`、`assessment_routes.py`、`dashboard_routes.py`、`auth_routes.py`。 |
 | `backend/app/services/` | 认证、用户画像/数据、Firestore、AI 服务和配置；`user_data_service.py` 按 memory/MySQL/Firestore 分支保存与读取。 |
 | `backend/app/utils/db_mysql.py`、`backend/schema.sql` | MySQL 访问辅助和表结构。 |
@@ -79,30 +81,30 @@ flowchart LR
 
 ### 4.1 页面进入与认证门禁
 
-1. `src/index.js` 用 `HashRouter` 渲染 `App`。
-2. `App.js` 将 `/dashboard`、`/assessment`、`/coach` 放入 `ProtectedRoute`；没有 `currentUser` 时跳转 `/login`。
-3. 当前 `AuthContext` 的 `login`/`signup` 不调用后端，而是生成随机的 `dev-user-*`，将用户和资料放入浏览器 `localStorage`。这证明了“开发态可体验”，不能证明真实账户认证已经接通。
+1. [`src/index.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/index.js#L1-L15) 用 `HashRouter` 渲染 `App`。
+2. [`App.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/App.js#L73-L150) 将 `/dashboard`、`/assessment`、`/coach` 放入 `ProtectedRoute`；没有 `currentUser` 时跳转 `/login`。
+3. 当前 [`AuthContext.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/contexts/AuthContext.js#L18-L141) 的 `login`/`signup` 不调用后端，而是生成随机的 `dev-user-*`，将用户和资料放入浏览器 `localStorage`。这证明了“开发态可体验”，不能证明真实账户认证已经接通。
 
 ### 4.2 评估流程
 
 1. `Assessment.js` 根据题目答案计算总分和分类百分比（`:391-425`）。
-2. 用户保存结果时，调用 `submitAssessmentNew`，请求 `/api/assessment/submit`（`:427-446`；封装在 `src/services/api.js:319-328`）。
-3. Flask `assessment_routes.py` 校验 `answers`、`scores`，生成建议，并交给 `UserDataService` 保存；还会尝试写入 legacy Firestore 兼容路径。
-4. 历史记录通过 `/api/assessment/history` 拉取；开始教练前，前端还把一份展示用评估摘要写入 `localStorage` 的 `assessmentResults`（`Assessment.js:448-457`）。
+2. 用户保存结果时，调用 [`Assessment.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/pages/Assessment.js#L427-L446) 的 `submitAssessmentNew`，请求 `/api/assessment/submit`；封装在 [`api.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/services/api.js#L319-L328)。
+3. Flask [`assessment_routes.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/assessment_routes.py#L96-L188) 校验 `answers`、`scores`，生成建议，并交给 `UserDataService` 保存；还会尝试写入 legacy Firestore 兼容路径。
+4. 历史记录通过 `/api/assessment/history` 拉取；开始教练前，前端还把一份展示用评估摘要写入 `localStorage` 的 `assessmentResults`（[`Assessment.js#L448-L457`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/pages/Assessment.js#L448-L457)）。
 
 ### 4.3 AI 教练流程
 
-1. `CoachChat.js` 读取 `assessmentResults`，把当前用户 ID、消息、聊天历史和评估上下文组装后调用 `sendMessageToCoach`（`CoachChat.js:191-216`）。
+1. [`CoachChat.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/pages/CoachChat.js#L191-L216) 读取 `assessmentResults`，把当前用户 ID、消息、聊天历史和评估上下文组装后调用 `sendMessageToCoach`。
 2. 前端请求 `/api/coach/chat`；后端校验消息后调用 `ZhipuAIService`。
-3. `ZhipuAIService` 读取 `ZHIPUAI_API_KEY`，以最多 10 条历史消息构造提示词，调用 `glm-4-flash`，过滤 `<think>` 标签并把历史留在当前进程内存中（`backend/app/services/zhipuai_service.py:21-39`、`:41-119`）。
+3. [`ZhipuAIService`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/services/zhipuai_service.py#L21-L119) 读取 `ZHIPUAI_API_KEY`，以最多 10 条历史消息构造提示词，调用 `glm-4-flash`，过滤 `<think>` 标签并把历史留在当前进程内存中。
 
 ### 4.4 Dashboard 流程与当前边界
 
-后端已经提供 `/api/dashboard/overview`、`/financial-health`、`/goals` CRUD、`/statistics` 和 `/recommendations`，并由 `dashboard_routes.py` 组合用户画像和数据服务。但当前 `src/pages/Dashboard.js:29-48` 明确写着“现在使用模拟数据”，直接构造 `financialHealth`、储蓄、预算和交易记录；编辑保存也只更新 React 状态，并标注“应该调用 API”（`:61-86`）。因此当前可确认的是“后端 API 和前端展示分别存在”，不能把它们描述为已经完成端到端接通。
+后端已经提供 `/api/dashboard/overview`、`/financial-health`、`/goals` CRUD、`/statistics` 和 `/recommendations`，并由 [`dashboard_routes.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/dashboard_routes.py#L38-L305) 组合用户画像和数据服务。但当前 [`Dashboard.js`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/pages/Dashboard.js#L29-L86) 明确写着“现在使用模拟数据”，直接构造 `financialHealth`、储蓄、预算和交易记录；编辑保存也只更新 React 状态，并标注“应该调用 API”。因此当前可确认的是“后端 API 和前端展示分别存在”，不能把它们描述为已经完成端到端接通。
 
 ### 4.5 数据存储与部署路径
 
-- `backend/app/config.py` 默认 `DB_TYPE=memory`；`firestore_service.py` 在开发态使用模块级 `_dev_db`，`user_data_service.py` 另外提供 MySQL 和 Firestore 分支。
+- [`backend/app/config.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/config.py#L3-L27) 默认 `DB_TYPE=memory`；[`firestore_service.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/services/firestore_service.py#L21-L85) 在开发态使用模块级 `_dev_db`，[`user_data_service.py`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/services/user_data_service.py#L48-L156) 另外提供 MySQL 和 Firestore 分支。
 - 本地推荐前端 `npm start`（3000）+ `python backend/run_dev_enhanced.py`（5001）。
 - 静态展示可发布 `docs/`；完整体验需要一个可访问的 Flask API、正确 CORS、AI Key 和持久化存储。
 - 生产文档明确要求不要使用开发态默认 `SECRET_KEY`、mock auth 或内存数据。
@@ -111,11 +113,11 @@ flowchart LR
 
 | 前端意图 | 后端实现 | 备注 |
 | --- | --- | --- |
-| 健康检查 | `GET /api/health` | app factory 中直接注册。 |
-| AI 教练 | `POST /api/coach/chat`、`GET /api/coach/health` | `coach_routes.py`；当前聊天路由本身没有复用评估/Dashboard 的认证装饰器。 |
-| 评估 | `POST /api/assessment/submit`、`GET /api/assessment/latest`、`/history`、`/results` | 评估路由有认证装饰器，开发态可绕过。 |
-| Dashboard | `/api/dashboard/overview`、`/financial-health`、`/goals`、`/statistics`、`/recommendations` | 后端路由完整度高于当前 Dashboard 页面实际接入程度。 |
-| 认证 | `auth_routes.py` 中 `/verify_token`、`/me` | 前端当前 `AuthContext` 没有调用这两条接口。 |
+| 健康检查 | `GET /api/health` | [`app/__init__.py#L119-L122`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/__init__.py#L119-L122) 中直接注册。 |
+| AI 教练 | `POST /api/coach/chat`、`GET /api/coach/health` | [`coach_routes.py#L43-L90`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/coach_routes.py#L43-L90)；当前聊天路由本身没有复用评估/Dashboard 的认证装饰器。 |
+| 评估 | `POST /api/assessment/submit`、`GET /api/assessment/latest`、`/history`、`/results` | [`assessment_routes.py#L53-L188`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/assessment_routes.py#L53-L188) 有认证装饰器，开发态可绕过。 |
+| Dashboard | `/api/dashboard/overview`、`/financial-health`、`/goals`、`/statistics`、`/recommendations` | [`dashboard_routes.py#L38-L305`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/dashboard_routes.py#L38-L305)；后端路由完整度高于当前 Dashboard 页面实际接入程度。 |
+| 认证 | [`auth_routes.py#L7-L75`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/auth_routes.py#L7-L75) 中 `/verify_token`、`/me` | 前端当前 `AuthContext` 没有调用这两条接口。 |
 
 另外，`src/services/api.js` 仍保留 `/assessments/{userId}`、`/users/{userId}` 等旧式封装，而当前后端路由主要是单数 `/assessment`、蓝图前缀 `/dashboard`；这些旧封装是否仍被外部页面使用，需要后续清理前先确认，本文不将其认定为已失效业务。
 
@@ -145,13 +147,13 @@ $env:DEV_MODE='true'; python -c "from backend.app import create_app; app=create_
 
 | 风险/疑问 | 代码事实 | 当前影响或需要确认的内容 |
 | --- | --- | --- |
-| 认证仍是开发态 | 前端登录/注册只生成 `dev-user-*` 并写 `localStorage`；后端部分装饰器在开发态直接注入测试用户。 | 不能把当前登录当作真实账户安全边界；需要确认生产是否强制 Firebase 验证，以及 `DEV_MODE` 的配置来源。 |
-| `DEV_MODE` 读取口径不完全一致 | `run_dev_enhanced.py` 设置环境变量 `DEV_MODE=true`；评估路由同时看环境变量和 Flask config，但 auth/Dashboard 主要看 `current_app.config`。 | 这是静态代码发现，不等于已证明某环境必然绕过认证；应通过配置矩阵测试确认。 |
-| Dashboard 数据尚未端到端接入 | 后端 Dashboard API 存在，但 `Dashboard.js` 当前构造 mock 数据，保存编辑只改本地状态。 | 用户可能看到与后端账户不一致的数据；这是最直接的产品完整性缺口。 |
-| 开发态存储不持久 | 默认 `DB_TYPE=memory`，开发数据放在模块级 `_dev_db`。 | 进程重启会丢数据；生产必须明确选 MySQL 或 Firestore，并验证迁移/索引/备份。 |
-| AI 对话的隐私与隔离边界 | `/api/coach/chat` 路由没有看到认证装饰器；服务把对话按 `user_id` 存在进程内字典，并记录用户 ID/消息片段日志。 | 需要确认公网部署是否另有网关鉴权、日志保留和用户 ID 校验；不能仅凭前端受保护路由推断 API 已安全。 |
-| API 地址存在环境分叉 | `api.js` 同时维护 axios、通用 fetch 和教练专用 fetch；GitHub Pages 分支仍有 `https://你的API服务器地址` 占位符。 | 静态页面可以打开不等于 AI/评估/Dashboard 可用；应统一 API base URL 并做部署配置检查。 |
-| 默认密钥风险 | `backend/app/config.py` 提供开发用默认 `SECRET_KEY`，文档要求生产替换。 | 这是部署配置风险，不是本次发现了真实密钥；上线检查应阻止默认值。 |
+| 认证仍是开发态 | [`AuthContext.js#L18-L141`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/contexts/AuthContext.js#L18-L141) 前端登录/注册只生成 `dev-user-*` 并写 `localStorage`；后端 [`auth_routes.py#L7-L75`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/auth_routes.py#L7-L75) 等部分装饰器在开发态直接注入测试用户。 | 不能把当前登录当作真实账户安全边界；需要确认生产是否强制 Firebase 验证，以及 `DEV_MODE` 的配置来源。 |
+| `DEV_MODE` 读取口径不完全一致 | [`run_dev_enhanced.py#L40-L54`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/run_dev_enhanced.py#L40-L54) 设置环境变量 `DEV_MODE=true`；评估路由 [`assessment_routes.py#L96-L123`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/assessment_routes.py#L96-L123) 同时看环境变量和 Flask config，但 auth/Dashboard 主要看 `current_app.config`。 | 这是静态代码发现，不等于已证明某环境必然绕过认证；应通过配置矩阵测试确认。 |
+| Dashboard 数据尚未端到端接入 | 后端 [`dashboard_routes.py#L38-L305`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/dashboard_routes.py#L38-L305) API 存在，但 [`Dashboard.js#L29-L86`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/pages/Dashboard.js#L29-L86) 当前构造 mock 数据，保存编辑只改本地状态。 | 用户可能看到与后端账户不一致的数据；这是最直接的产品完整性缺口。 |
+| 开发态存储不持久 | [`config.py#L18-L27`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/config.py#L18-L27) 默认 `DB_TYPE=memory`，开发数据在 [`firestore_service.py#L21-L63`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/services/firestore_service.py#L21-L63) 的模块级 `_dev_db` 中。 | 进程重启会丢数据；生产必须明确选 MySQL 或 Firestore，并验证迁移/索引/备份。 |
+| AI 对话的隐私与隔离边界 | [`coach_routes.py#L43-L90`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/routes/coach_routes.py#L43-L90) 的 `/api/coach/chat` 路由没有看到认证装饰器；[`zhipuai_service.py#L36-L119`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/services/zhipuai_service.py#L36-L119) 把对话按 `user_id` 存在进程内字典，并记录用户 ID/消息片段日志。 | 需要确认公网部署是否另有网关鉴权、日志保留和用户 ID 校验；不能仅凭前端受保护路由推断 API 已安全。 |
+| API 地址存在环境分叉 | [`api.js#L5-L12`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/services/api.js#L5-L12) 与 [`api.js#L50-L67`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/src/services/api.js#L50-L67) 同时维护 axios、通用 fetch 和教练专用 fetch；GitHub Pages 分支仍有 `https://你的API服务器地址` 占位符。 | 静态页面可以打开不等于 AI/评估/Dashboard 可用；应统一 API base URL 并做部署配置检查。 |
+| 默认密钥风险 | [`config.py#L3-L13`](https://github.com/XiaoCow666/Caifusi/blob/2a4dddc2fe542e11a46105d20b35594f5d24ff18/backend/app/config.py#L3-L13) 提供开发用默认 `SECRET_KEY`，文档要求生产替换。 | 这是部署配置风险，不是本次发现了真实密钥；上线检查应阻止默认值。 |
 | 自动化回归信号不足 | 当前无匹配的前端测试，后端依赖也未安装到本机。 | 业务改动容易只依赖手工体验；需要最小 smoke test 和干净环境验证。 |
 
 本文没有把 README 的“主要功能”表自动等同于“已接通功能”：凡是和源码行为存在差异的地方，以源码和命令结果为准；凡是没有真实部署配置/服务支撑的地方，均标为待确认或推断。
