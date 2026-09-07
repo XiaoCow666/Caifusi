@@ -145,8 +145,8 @@ CoachChat.js 组件收集 { message, user_id, chat_history, assessment_result }
     ↓
 调用 sendMessageToCoach(data) [src/services/api.js]
     ↓
-POST http://localhost:5001/api/coach/chat
-    ↓  (开发环境通过 setupProxy.js 代理)
+POST http://localhost:5001/api/coach/chat（前端直接请求后端绝对地址）
+    ↓
 coach_routes.py → chat() 处理请求
     ↓
 参数校验（message 必填）
@@ -168,6 +168,7 @@ zhipuai_service.get_chat_response(data)
 - 后端启动日志显示 `✓ 使用智谱AI GLM-4模型`
 - 实际对话测试中，AI 返回了包含 10 条理财策略、投资组合分配表格和风险提示的详细回复
 - 响应时间约 3-8 秒（取决于网络和 API 负载）
+- ⚠️ `src/setupProxy.js` 虽配置了 `/api` → `http://localhost:5001` 的开发代理，但 `api.js` 中实际使用绝对地址 `http://localhost:5001` 直接请求后端，**请求不经过前端开发服务器代理**；CORS 由后端 Flask-CORS 处理
 
 ### 3.2 用户认证流程（推断）
 
@@ -502,7 +503,9 @@ gunicorn>=21.2.0
 
 #### 验证方式（必须全部完成后才能宣称"低风险"）
 
-改进后需在以下环境分别验证：
+> ⚠️ 以下验证分为两类：**修复后冒烟验证**（确认拆分方案本身可运行）和**根因验证**（确认原始依赖声明的问题归因）。两类验证目的不同，不可互相替代。
+
+**【修复后冒烟验证】**
 
 **场景 A：干净环境核心依赖安装 + 功能验证**
 ```bash
@@ -510,12 +513,11 @@ gunicorn>=21.2.0
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 2. 仅安装核心依赖（应无报错）
+# 2. 仅安装修改后的核心依赖（应无报错）
 pip install -r backend/requirements.txt
 
-# 3. 验证 sniffio 已安装且 zhipuai 依赖树
+# 3. 冒烟验证：sniffio 可导入（因已显式声明，此步仅确认安装成功，不验证根因）
 python -c "import sniffio; print('sniffio:', sniffio.__version__)"
-pip show zhipuai  # 确认 Requires 字段是否包含 sniffio
 
 # 4. 启动后端，确认 AI 服务初始化成功（无 ModuleNotFoundError）
 python backend/run_dev_enhanced.py
@@ -527,11 +529,11 @@ curl -s -X POST http://localhost:5001/api/coach/chat \
   -d '{"message":"你好","user_id":"test"}'
 ```
 
-**场景 B：Windows 环境验证 gunicorn 不再阻塞**
+**场景 B：Windows 环境验证可选依赖不再阻塞**
 ```bash
 # Windows 10 / Python 3.14
 pip install -r backend\requirements.txt
-# 确认：不再因 gunicorn 报错；firebase-admin 也不在默认依赖中
+# 确认：默认依赖安装成功；firebase-admin 和 gunicorn 均不在默认依赖中
 ```
 
 **场景 C：生产环境验证 gunicorn 可选安装**
@@ -547,6 +549,42 @@ gunicorn --version  # 确认已安装
 pip install -r backend/requirements.txt -r backend/requirements-firebase.txt
 pip list | grep -i gunicorn  # 应为空
 ```
+
+**【根因验证 — 确认原始依赖声明为何缺失 sniffio】**
+
+> ⚠️ 场景 A 中显式声明 sniffio 后可导入，**不能证明原始环境缺失 sniffio 的原因**。以下根因验证必须在**未修改的原始 `requirements.txt`** 上执行。
+
+**场景 E：原始依赖声明的 sniffio 传递依赖验证**
+```bash
+# 1. 新建干净虚拟环境（与原始报错环境一致的 Python/pip 版本）
+python -m venv venv-original
+source venv-original/bin/activate
+
+# 2. 安装原始（未修改的）requirements.txt，记录完整输出
+pip install -r backend/requirements.txt 2>&1 | tee install_log.txt
+
+# 3. 记录实际安装的 zhipuai 版本及完整传递依赖树
+pip show zhipuai
+pip install pipdeptree
+pipdeptree -p zhipuai  # 查看 zhipuai 的完整传递依赖，确认 sniffio 是否在其中
+
+# 4. 检查 sniffio 是否实际被安装（可能由其他间接依赖引入）
+pip show sniffio
+python -c "import sniffio; print('sniffio available')" 2>&1
+
+# 5. 若 sniffio 未安装，确认是哪个环节缺失：
+#    - zhipuai 的 Requires 字段是否声明 sniffio？
+#    - 若 zhipuai 未声明，是否有其他包传递引入了 sniffio？
+#    - 若都没有，则确认原始 requirements.txt 确实缺少 sniffio 声明
+```
+
+**根因验证需记录的信息：**
+- Python 版本、pip 版本
+- 原始 `requirements.txt` 安装的完整包列表及版本（`pip freeze`）
+- `pipdeptree -p zhipuai` 的完整输出
+- `pip show sniffio` 的结果（已安装/未安装）
+- 若已安装，是哪个包作为直接/间接依赖引入的
+- 若未安装，确认 `zhipuai>=2.1.5` 的 `Requires` 字段是否包含 sniffio
 
 #### 预期收益（待验证后确认）
 
