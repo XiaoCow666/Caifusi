@@ -1,6 +1,6 @@
 # Caifusi 财赋思 — 项目理解文档
 
-> 本文档基于公开仓库代码和实际运行验证整理，用于项目定位、模块结构、核心流程、运行结果、风险疑问和低风险改进方向的梳理。
+> 本文档基于公开仓库代码和实际运行验证整理，用于项目定位、模块结构、核心流程、运行结果、风险疑问和改进方向的梳理。
 
 ---
 
@@ -231,7 +231,7 @@ dashboard_routes.py 返回数据（开发态为内存中的 mock 数据）
 | 项 | 文档要求 | 实际验证环境 | 结果 |
 |---|---|---|---|
 | Node.js | ≥ 18 | 20.x（Windows） | ✅ 通过 |
-| Python | ≥ 3.8 | 3.12.11（Ubuntu，主验证）/ 3.14（Windows，依赖兼容验证） | ✅ 3.12 核心依赖安装成功；⚠️ 3.14 上 firebase-admin 解析失败（见风险节） |
+| Python | ≥ 3.8 | 3.12.11（Ubuntu，主验证）/ 3.14（Windows，依赖兼容验证） | ✅ 3.12 手动安装核心依赖成功；⚠️ 3.14 上完整 `pip install -r requirements.txt` 出现 `resolution-too-deep`（现象观察，根因待确认，见 §5.1.1） |
 | 智谱 AI API Key | 必填 | 已配置（.env，未提交） | ✅ 正常调用，ZhipuAIService 初始化成功 |
 | Gemini API Key | 可选 | 未配置 | ✅ 不影响主功能 |
 
@@ -309,7 +309,9 @@ Compiled successfully!
 
 #### Ubuntu 22.04 / Python 3.12.11 环境 API 实测（2026-09-07）
 
-**依赖安装：** 仅安装核心依赖（flask、flask-cors、zhipuai、sniffio、PyMySQL 等），跳过可选的 firebase-admin / gunicorn / google-generativeai，安装成功无报错。
+> ⚠️ **验证方式说明**：以下实测为**手动选择性安装核心依赖**后的运行结果，**不是**执行原始 `pip install -r backend/requirements.txt` 全量安装的结果。该实测验证了「核心依赖子集可运行」，但**不能证明原始安装流程已修复**，也不能替代 §6 中要求的干净环境全量验证。
+
+**依赖安装方式（手动选择，非原始 requirements.txt）：** 仅安装核心依赖（flask、flask-cors、zhipuai、sniffio、PyMySQL 等），跳过可选的 firebase-admin / gunicorn / google-generativeai，安装成功无报错。精确安装命令及各包版本待补充。
 
 **后端启动关键日志：**
 ```
@@ -356,14 +358,21 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
 
 | # | 风险 | 严重程度 | 说明 | 证据 |
 |---|---|---|---|---|
-| R1 | **Python 3.14 依赖解析失败** | 高 | `requirements.txt` 中 `firebase-admin>=6.5.0` 在 Python 3.14 上触发 `error: resolution-too-deep`，pip 无法解析依赖图 | 实际运行 `pip install -r backend/requirements.txt` 报错 |
-| R2 | **缺少 sniffio 隐式依赖** | 中 | `zhipuai` SDK 依赖 `sniffio`，但 `requirements.txt` 未声明，导致首次启动时 `ModuleNotFoundError: No module named 'sniffio'`，AI 服务降级为 mock | 后端启动日志报错 |
 | R3 | **认证为 mock 实现** | 高 | `AuthContext.js` 使用本地 mock auth，用户数据存 localStorage，无真实后端认证，不可用于生产 | README 明确说明 |
 | R4 | **数据持久化缺失** | 中 | 开发态数据主要在内存中，服务重启后数据丢失；MySQL/Firebase 需额外配置 | README 和代码结构 |
 | R5 | **重复代码目录** | 低 | `backend/app/services/` 和 `backend/services/`、`backend/app/routes/` 和 `backend/routes/` 并存，代码维护混乱 | 目录结构观察 |
 | R6 | **多个启动脚本并存** | 低 | `run.py`、`run_dev.py`、`run_dev_enhanced.py`、`run_dev_fixed.py` 四个启动入口，职责不清晰 | 目录结构观察 |
 | R7 | **前端 API 地址硬编码占位符** | 低 | `src/services/api.js` 中 GitHub Pages 环境的 API 地址硬编码为 `'https://你的API服务器地址'` | 代码阅读 |
 | R8 | **gunicorn 不支持 Windows** | 低 | `requirements.txt` 包含 `gunicorn`，但 gunicorn 是 Unix-only，Windows 上无法安装使用 | 常识 + requirements.txt |
+
+### 5.1.1 观察到的依赖故障现象（根因待确认）
+
+> ⚠️ 以下为实际运行中观察到的报错现象，**根因尚未经隔离实验确认**。当前归因仅为基于现象的推测，不作为已证实结论。
+
+| # | 观察到的现象 | 推测归因（待确认） | 验证环境与命令 | 缺失的验证 |
+|---|---|---|---|---|
+| R1 | 完整执行 `pip install -r backend/requirements.txt` 时出现 `error: resolution-too-deep`，pip 依赖解析失败 | 推测与 `firebase-admin>=6.5.0` 在 Python 3.14 上的依赖图有关，但**未通过单独安装 firebase-admin 复现**，不能排除其他依赖组合触发 | Windows 10 / Python 3.14 / pip 版本待补充；命令：`pip install -r backend/requirements.txt`；完整错误日志待补充 | 需在干净环境中单独安装 firebase-admin 验证是否复现；需确认 pip 版本及 `--resolution` 参数；需对比 Python 3.12 下完整安装是否成功 |
+| R2 | 后端首次启动时出现 `ModuleNotFoundError: No module named 'sniffio'`，AI 服务初始化受影响 | 推测 `zhipuai` SDK 依赖 `sniffio` 但 `requirements.txt` 未显式声明；但**同一文档后文又称 SDK 已隐式安装 sniffio**，两种描述未区分，需确认报错发生时的依赖安装方式 | 报错环境与精确安装命令待补充；后端启动日志完整片段待补充 | 需确认报错时是否执行了完整 `pip install -r requirements.txt`；需验证 `pip show zhipuai` 的依赖列表是否包含 sniffio；需区分「全新安装后首次启动」与「手动补装部分依赖后启动」两种场景 |
 
 ### 5.2 待确认疑问（推断）
 
@@ -377,21 +386,25 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
 
 ---
 
-## 6. 低风险改进方向（1-2 天可完成）
+## 6. 改进方向：后端依赖声明拆分（方案待验证）
 
-### 改进项：修复后端依赖声明，提升环境兼容性
+### 改进项：拆分可选依赖，显式声明 sniffio，提升环境兼容性
 
-**优先级：高 | 预估工作量：0.5-1 天 | 风险：极低**
+**优先级：高 | 预估工作量：0.5-1 天 | 风险：待评估（原文档标注为"极低"，但尚未在干净环境完成全量验证，以下保证在验证完成前不成立）**
 
 #### 问题描述
 
-当前 `backend/requirements.txt` 存在两个依赖问题：
-1. 未声明 `sniffio`（zhipuai SDK 的隐式依赖），导致首次启动 AI 服务初始化失败
-2. `firebase-admin>=6.5.0` 在较新 Python 版本（如 3.14）上依赖解析失败，阻塞整个依赖安装流程
+当前 `backend/requirements.txt` 存在以下待处理项：
+
+1. **观察到的现象（根因待确认）**：在 Windows 10 / Python 3.14 上完整执行 `pip install -r backend/requirements.txt` 出现 `error: resolution-too-deep`。推测可能与 `firebase-admin>=6.5.0` 的依赖图有关，但未通过单独安装复现，不能排除其他依赖组合触发。
+2. **观察到的现象（根因待确认）**：后端首次启动时出现 `ModuleNotFoundError: No module named 'sniffio'`。推测 `zhipuai` SDK 依赖 `sniffio` 但顶层 `requirements.txt` 未显式声明；但同一环境下 `zhipuai` 安装时是否已隐式拉取 `sniffio` 尚未验证，两种可能性未区分。
+3. **已确认的设计问题**：`gunicorn` 是 Unix-only 软件包，放入默认 `requirements.txt` 会导致 Windows 用户安装失败；`firebase-admin` 和 `google-generativeai` 属于可选功能依赖，不应阻塞核心功能安装。
 
 #### 改进方案
 
-**修改 `backend/requirements.txt`：**
+**第一步：修改 `backend/requirements.txt`（核心依赖）**
+
+将可选依赖从默认安装中移除，显式添加 `sniffio`：
 
 ```diff
   # Flask 框架及扩展
@@ -403,24 +416,22 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
 
 - # Firebase Admin SDK
 - firebase-admin>=6.5.0
-+ # Firebase Admin SDK（可选，仅在使用 Firebase 存储时安装）
-+ # firebase-admin>=6.5.0
++ # Firebase Admin SDK → 见 requirements-firebase.txt（可选）
 
   # Google Generative AI (如果使用 Gemini)
 - google-generativeai>=0.3.1
-+ # google-generativeai>=0.3.1
++ # Google Generative AI → 见 requirements-gemini.txt（可选）
 
   # HTTP 请求库
   requests>=2.31.0
 
 - # WSGI 服务器
 - gunicorn>=21.2.0
-+ # WSGI 服务器（Unix 生产环境使用，Windows 开发环境不需要）
-+ # gunicorn>=21.2.0
++ # WSGI 服务器 → 见 requirements-prod.txt（Unix 生产环境可选）
 
   # 智谱 AI SDK
   zhipuai>=2.1.5
-+ # zhipuai SDK 隐式依赖，需显式声明
++ # zhipuai SDK 运行时依赖（显式声明，避免隐式依赖缺失）
 + sniffio>=1.3.0
 
   # MySQL 数据库驱动及加密支持
@@ -428,54 +439,119 @@ $ curl -s -X POST http://localhost:5001/api/coach/chat \
   cryptography>=41.0.0
 ```
 
-**同时新增 `backend/requirements-optional.txt`：**
+**第二步：按功能拆分可选依赖文件（不再合并为单一 optional 文件）**
+
+新增 `backend/requirements-firebase.txt`：
 ```txt
-# 可选依赖 — 按需安装
-# Firebase Admin SDK（使用 Firebase 存储时）
+# 可选依赖 — Firebase 存储功能
+# 仅当 DB_TYPE=firebase 或使用 firestore_service.py 时安装
 firebase-admin>=6.5.0
-# Google Generative AI（使用 Gemini 时）
+```
+
+新增 `backend/requirements-gemini.txt`：
+```txt
+# 可选依赖 — Google Gemini AI 模型
+# 仅当配置 GEMINI_API_KEY 并使用 Gemini 时安装
 google-generativeai>=0.3.1
-# WSGI 服务器（Unix 生产环境）
+```
+
+新增 `backend/requirements-prod.txt`：
+```txt
+# 可选依赖 — Unix 生产环境 WSGI 服务器
+# 仅在 Linux/macOS 生产部署时安装；Windows 不支持
 gunicorn>=21.2.0
 ```
 
-#### 为什么是低风险
+**第三步：各环境安装命令矩阵**
 
-1. **只改依赖声明，不碰业务逻辑** — 所有 Python 代码文件不做任何修改
-2. **核心功能不受影响** — 智谱 AI、Flask、MySQL 等核心依赖保留，AI 教练功能正常
-3. **可选依赖不删除** — 移到 `requirements-optional.txt`，需要时仍可安装
-4. **新增 `sniffio` 是补全缺失依赖** — 实际上 zhipuai SDK 已经隐式安装了它，只是显式声明更规范
-5. **可回滚** — 如果有问题，恢复原 `requirements.txt` 即可
+| 环境 | 用途 | 安装命令 |
+|---|---|---|
+| 本地开发（Windows/macOS/Linux） | 核心功能 + 智谱 AI | `pip install -r backend/requirements.txt` |
+| 使用 Firebase 存储 | 核心 + Firebase | `pip install -r backend/requirements.txt -r backend/requirements-firebase.txt` |
+| 使用 Gemini 模型 | 核心 + Gemini | `pip install -r backend/requirements.txt -r backend/requirements-gemini.txt` |
+| 生产部署（Linux） | 核心 + WSGI 服务器 | `pip install -r backend/requirements.txt -r backend/requirements-prod.txt` |
+| 生产部署 + Firebase（Linux） | 全量 | `pip install -r backend/requirements.txt -r backend/requirements-firebase.txt -r backend/requirements-prod.txt` |
 
-#### 验证方式
+> ⚠️ 注意：Windows 用户即使需要 Firebase，也只安装 `requirements-firebase.txt`，不会引入 `gunicorn`（因为 gunicorn 已独立到 `requirements-prod.txt`）。
 
-改进后在干净环境中验证：
+**第四步：需要同步修改的部署入口与文档位置**
+
+依赖拆分后，以下文件中引用 `requirements.txt` 或 `gunicorn` 的位置必须同步更新，否则生产部署会缺少 gunicorn：
+
+| 文件 | 行号/位置 | 当前内容 | 需要修改为 |
+|---|---|---|---|
+| `README.md` | 第 95 行 | `pip install -r backend/requirements.txt` | 补充说明：核心依赖安装命令；生产环境需追加 `-r backend/requirements-prod.txt` |
+| `DEPLOYMENT_GUIDE.md` | 第 37 行（Windows） | `pip install -r backend\requirements.txt` | 保持核心安装命令，补充可选依赖说明 |
+| `DEPLOYMENT_GUIDE.md` | 第 46 行（Linux） | `pip install -r backend/requirements.txt` | 生产部署应改为 `pip install -r backend/requirements.txt -r backend/requirements-prod.txt` |
+| `DEPLOYMENT_GUIDE.md` | 第 184-185 行 | `pip install --upgrade pip` + `pip install -r backend/requirements.txt` | 生产环境追加 prod 依赖 |
+| `DEPLOYMENT_GUIDE.md` | 第 223 行 | `.venv/bin/gunicorn ...` | gunicorn 调用保持不变，但需确认 prod 依赖已安装 |
+| `DEPLOYMENT_GUIDE.md` | 第 248 行（systemd） | `ExecStart=.../gunicorn ...` | 同上，systemd 服务定义保持不变 |
+| `DEPLOYMENT_GUIDE.md` | 第 312 行 | `pip install -r backend/requirements.txt` | 根据部署场景追加对应可选依赖 |
+
+#### 风险评估（待验证，原"低风险"保证暂撤回）
+
+> ⚠️ 以下为原文档给出的"低风险"理由，**在完成干净环境全量验证前，不作为已确认结论**。
+
+1. **只改依赖声明，不碰业务逻辑** — 所有 Python 代码文件不做任何修改（✅ 已确认：方案仅涉及 requirements 文件）
+2. **核心功能不受影响** — ⚠️ 待验证：需在干净环境中仅安装核心依赖后，确认 AI 教练、Dashboard、Assessment 等接口均正常运行；当前 Ubuntu 实测为手动安装部分依赖，不能证明原始安装流程已修复
+3. **可选依赖不删除** — 移到独立的功能文件，需要时仍可安装（✅ 方案设计层面成立）
+4. **新增 `sniffio` 是补全缺失依赖** — ⚠️ 待验证：需确认 `zhipuai>=2.1.5` 的实际依赖树是否包含 `sniffio`；若 SDK 已隐式安装，则显式声明仅为规范加固，不改变行为；若 SDK 未声明，则此修改确实修复缺失
+5. **可回滚** — 如果有问题，恢复原 `requirements.txt` 并删除新增的可选文件即可（✅ 已确认）
+
+#### 验证方式（必须全部完成后才能宣称"低风险"）
+
+改进后需在以下环境分别验证：
+
+**场景 A：干净环境核心依赖安装 + 功能验证**
 ```bash
-# 1. 新建虚拟环境
+# 1. 新建虚拟环境（Python 3.12 和 3.14 各一次）
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 2. 安装核心依赖（应无报错）
+# 2. 仅安装核心依赖（应无报错）
 pip install -r backend/requirements.txt
 
-# 3. 验证 sniffio 已安装
-python -c "import sniffio; print(sniffio.__version__)"
+# 3. 验证 sniffio 已安装且 zhipuai 依赖树
+python -c "import sniffio; print('sniffio:', sniffio.__version__)"
+pip show zhipuai  # 确认 Requires 字段是否包含 sniffio
 
 # 4. 启动后端，确认 AI 服务初始化成功（无 ModuleNotFoundError）
 python backend/run_dev_enhanced.py
 
-# 5. 测试 AI 教练对话
-curl -X POST http://localhost:5001/api/coach/chat \
+# 5. 测试核心功能
+curl -s http://localhost:5001/api/health
+curl -s -X POST http://localhost:5001/api/coach/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"你好","user_id":"test"}'
 ```
 
-#### 预期收益
+**场景 B：Windows 环境验证 gunicorn 不再阻塞**
+```bash
+# Windows 10 / Python 3.14
+pip install -r backend\requirements.txt
+# 确认：不再因 gunicorn 报错；firebase-admin 也不在默认依赖中
+```
 
-- 新用户按照 README 执行 `pip install -r backend/requirements.txt` 不再报错
-- 首次启动不再出现 `sniffio` 缺失导致的 AI 服务降级
-- Windows 用户不再被 `gunicorn` 安装问题阻塞
-- 依赖安装时间从「解析失败需手动分步安装」缩短为「一次成功」
+**场景 C：生产环境验证 gunicorn 可选安装**
+```bash
+# Linux 生产环境
+pip install -r backend/requirements.txt -r backend/requirements-prod.txt
+gunicorn --version  # 确认已安装
+```
+
+**场景 D：可选依赖独立安装验证**
+```bash
+# 验证 Firebase 可选文件不引入 gunicorn
+pip install -r backend/requirements.txt -r backend/requirements-firebase.txt
+pip list | grep -i gunicorn  # 应为空
+```
+
+#### 预期收益（待验证后确认）
+
+- 新用户按照 README 执行 `pip install -r backend/requirements.txt` 不再因可选依赖报错（需场景 A/B 验证）
+- 首次启动不再出现 `sniffio` 缺失导致的 AI 服务初始化问题（需场景 A 验证）
+- Windows 用户不再被 `gunicorn` 安装问题阻塞（需场景 B 验证）
+- 可选依赖可按功能独立安装，不会因安装 Firebase 而引入 gunicorn（需场景 D 验证）
 
 ---
 
@@ -483,7 +559,7 @@ curl -X POST http://localhost:5001/api/coach/chat \
 
 Caifusi 财赋思是一个结构清晰的 React + Flask AI 金融教育应用，核心功能（AI 教练对话）已验证可正常运行。项目当前处于 `v0.1.0` 早期阶段，认证和数据持久化仍为开发态 mock，依赖管理存在一些兼容性问题。
 
-**最优先的改进**是修复 `requirements.txt` 的依赖声明问题（添加 `sniffio`、将 `firebase-admin` 和 `gunicorn` 改为可选），这能显著提升新用户的上手体验，且风险极低、半天即可完成。
+**最优先的改进方向**是拆分 `requirements.txt` 的可选依赖（将 `firebase-admin`、`google-generativeai`、`gunicorn` 按功能独立为可选文件，并显式声明 `sniffio`）。该方案设计上能显著提升新用户的上手体验，但**风险等级和实际收益需在完成 §6 所列的干净环境全量验证后才能确认**，当前不宜宣称"风险极低"。
 
 ---
 
