@@ -11,7 +11,13 @@
  *         · 断网（Failed to fetch）→ 既定中文提示
  *         · 请求拦截器 JWT 头、响应拦截器 401 清 token（既有约定防回归）
  *
- * 运行命令：CI=true npm test -- --watchAll=false（期望 10 passed）
+ * 运行命令：CI=true npm test -- --watchAll=false（基线 10 passed；本文件扩展后共
+ *           31 条，覆盖 api.js 全部 17 个导出函数——见文末「扩展回归」段）
+ * 扩展回归（2026-09-08）：PR #3 只收敛了 sendMessageToCoach；其余导出函数
+ *       （auth / user / assessment / dashboard 包装器）的“路径不拼 /api、方法/
+ *       载荷透传、失败原样重抛”约定此前零测试固化。扩展段仅锁定现状约定，
+ *       不改动任何实现；其中 getDashboardOverview 对 {status} 业务包络的
+ *       处理与文件头规范注释存在已知偏差，以单独用例固化现状并标注跟进。
  * 说明：axios 以 jest.mock 整体替换（零网络）；拦截器分支通过捕获注册的
  *       onFulfilled/onRejected 处理器直接驱动，与浏览器行为等价。
  */
@@ -46,7 +52,25 @@ jest.mock('axios', () => {
 });
 
 import axios from 'axios';
-import { sendMessageToCoach } from '../services/api';
+import {
+  sendMessageToCoach,
+  registerUser,
+  loginUser,
+  submitAssessment,
+  fetchUserProfile,
+  fetchAssessmentResults,
+  checkHealth,
+  getDashboardOverview,
+  getFinancialHealth,
+  getUserGoals,
+  createGoal,
+  updateGoal,
+  deleteGoal,
+  getRecommendations,
+  submitAssessmentNew,
+  getLatestAssessment,
+  getAssessmentHistory,
+} from '../services/api';
 
 const { requestHandlers, responseHandlers } = axios.__test;
 // 模块加载时 axios.create 已被 api.js 调用一次，捕获返回的实例
@@ -143,5 +167,94 @@ describe('sendMessageToCoach（复审建议的运行时分支固化为回归测�
     await expect(sendMessageToCoach(payload)).rejects.toThrow(
       '无法连接到AI教练服务，请确认后端服务已启动'
     );
+  });
+});
+
+/* =====================================================================
+ * 扩展回归（STAGE2-ISSUE-001 A5 口径延伸）：其余业务导出函数
+ * ---------------------------------------------------------------------
+ * 背景：PR #3 只将 sendMessageToCoach 收敛进 axios 实例；其余导出函数
+ *      （auth / user / assessment / dashboard 包装器）的既有约定此前
+ *      零测试固化。以下用例只“锁定现状约定”，不改动任何实现：
+ *        · 请求路径全部走 api 实例且不再拼 /api 前缀（baseURL 已含 /api）
+ *        · 方法（POST/GET/PUT/DELETE）与载荷/params 透传正确
+ *        · 成功 → response.data 原样返回；失败 → axios 错误原样重抛
+ * =================================================================== */
+
+describe('业务导出函数：请求路由与错误语义回归（扩展）', () => {
+  const mockPayload = { message: '测试载荷', n: 1 };
+
+  const ROUTE_CASES = [
+    // [用例名, 函数, 期望方法, 调用实参, 期望的实例调用（首参=路径，断言不得以 /api 开头）]
+    ['registerUser → POST /auth/register', registerUser, 'post', [mockPayload], ['/auth/register', mockPayload]],
+    ['loginUser → POST /auth/login（email/password 封装）', loginUser, 'post', ['a@b.c', 'pw'], ['/auth/login', { email: 'a@b.c', password: 'pw' }]],
+    ['submitAssessment → POST /assessments/:userId（assessmentData 包一层）', submitAssessment, 'post', ['u-1', mockPayload], ['/assessments/u-1', { assessmentData: mockPayload }]],
+    ['fetchUserProfile → GET /users/:userId', fetchUserProfile, 'get', ['u-1'], ['/users/u-1']],
+    ['fetchAssessmentResults → GET /assessments/:userId', fetchAssessmentResults, 'get', ['u-1'], ['/assessments/u-1']],
+    ['checkHealth → GET /health', checkHealth, 'get', [], ['/health']],
+    ['getDashboardOverview → GET /dashboard/overview', getDashboardOverview, 'get', [], ['/dashboard/overview']],
+    ['getFinancialHealth → GET /dashboard/financial-health', getFinancialHealth, 'get', [], ['/dashboard/financial-health']],
+    ['getUserGoals（无过滤）→ params 传空对象', getUserGoals, 'get', [null], ['/dashboard/goals', { params: {} }]],
+    ['getUserGoals(status) → params 透传', getUserGoals, 'get', ['monthly'], ['/dashboard/goals', { params: { status: 'monthly' } }]],
+    ['createGoal → POST /dashboard/goals', createGoal, 'post', [mockPayload], ['/dashboard/goals', mockPayload]],
+    ['updateGoal → PUT /dashboard/goals/:goalId', updateGoal, 'put', ['g-1', mockPayload], ['/dashboard/goals/g-1', mockPayload]],
+    ['deleteGoal → DELETE /dashboard/goals/:goalId', deleteGoal, 'delete', ['g-1'], ['/dashboard/goals/g-1']],
+    ['getRecommendations → GET /dashboard/recommendations', getRecommendations, 'get', [], ['/dashboard/recommendations']],
+    ['submitAssessmentNew → POST /assessment/submit（assessment 包一层）', submitAssessmentNew, 'post', [mockPayload], ['/assessment/submit', { assessment: mockPayload }]],
+    ['getLatestAssessment → GET /assessment/latest', getLatestAssessment, 'get', [], ['/assessment/latest']],
+    ['getAssessmentHistory → GET /assessment/history', getAssessmentHistory, 'get', [], ['/assessment/history']],
+  ];
+
+  test.each(ROUTE_CASES)('%s', async (_name, fn, method, callArgs, expectedCall) => {
+    apiInstance[method].mockResolvedValue({ data: { ok: true } });
+    await fn(...callArgs);
+
+    expect(apiInstance[method]).toHaveBeenCalledWith(...expectedCall);
+    // 硬约定：路径不得以 /api 开头（axios baseURL 已含 /api，避免 /api/api 复现）
+    expect(expectedCall[0].startsWith('/api/')).toBe(false);
+  });
+
+  describe('成功/失败语义', () => {
+    beforeEach(() => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+    });
+    afterEach(() => {
+      jest.restoreAllMocks();
+      apiInstance.get.mockReset();
+      apiInstance.post.mockReset();
+    });
+
+    test('GET 成功：response.data 原样透传（fetchUserProfile）', async () => {
+      const data = { name: '张三', email: 'a@b.c' };
+      apiInstance.get.mockResolvedValue({ data });
+      await expect(fetchUserProfile('u-1')).resolves.toEqual(data);
+      expect(apiInstance.get).toHaveBeenCalledWith('/users/u-1');
+    });
+
+    test('POST 成功：response.data 原样透传（loginUser）', async () => {
+      const data = { token: 't-1', user: { uid: 'u-1' } };
+      apiInstance.post.mockResolvedValue({ data });
+      await expect(loginUser('a@b.c', 'pw')).resolves.toEqual(data);
+    });
+
+    test('HTTP 500：错误原样重抛，不吞错不改文案（loginUser / getDashboardOverview）', async () => {
+      const err = { response: { status: 500, data: { message: '服务内部错误' } } };
+      apiInstance.post.mockRejectedValue(err);
+      await expect(loginUser('a@b.c', 'pw')).rejects.toBe(err);
+
+      apiInstance.get.mockRejectedValue(err);
+      await expect(getDashboardOverview()).rejects.toBe(err);
+    });
+
+    test('现状固化：getDashboardOverview 对 HTTP 200 + {status:error} 业务包络原样透传（不做包络校验）', async () => {
+      // ⚠️ 现状记录：文件头规范注释（api.js L23-25）要求 /dashboard/* 校验
+      //    {status} 业务包络并抛后端 message，但当前实现尚未执行该校验。
+      //    本用例只固化“现状不抛错、原样透传”，防止他人无意识改动语义；
+      //    何时按注释补包络校验，需等后端 /dashboard 契约确认后单独跟进。
+      const data = { status: 'error', message: '后端业务错误' };
+      apiInstance.get.mockResolvedValue({ data });
+      await expect(getDashboardOverview()).resolves.toEqual(data);
+    });
   });
 });
