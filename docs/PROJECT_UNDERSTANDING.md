@@ -11,8 +11,15 @@
 | AI 工具 | 豆包（Doubao）— 用于代码阅读、结构梳理、运行验证和文档撰写 |
 | 阅读范围 | `README.md`、`package.json`、`backend/app/__init__.py`、`backend/app/routes/coach_routes.py`、`backend/app/services/zhipuai_service.py`、`backend/requirements.txt`、`src/App.js`、`src/services/api.js`、`src/contexts/AuthContext.js`、项目目录结构 |
 | 验证环境 | Ubuntu 22.04 / Python 3.12.11（主验证环境）；另在 Windows 10 / Python 3.14 上做过依赖兼容性验证 |
-| 验证时间 | 2026-09-07 |
+| 验证时间 | 2026-09-07（初版）；2026-09-08（第四轮审查修复） |
 | 事实与推断边界 | **事实**：来自代码阅读和实际运行输出的内容；**推断**：基于代码结构推测的设计意图和潜在问题，已在文中标注。本文不包含任何 API 密钥、数据库凭据或用户隐私数据。 |
+
+### 第四轮审查修复记录
+
+| 编号 | 严重级别 | 问题 | 修复位置 |
+|---|---|---|---|
+| P2-1 | 中 | 场景 E 中 `INSTALL_EXIT_CODE=$?` 实际取自管道末尾的 `tee`，pip 失败时可能误判为成功 | §6 场景 E 步骤 2 |
+| P2-2 | 中 | 场景 E 中步骤 3b 的日志提取与 `exit 1` 位于 `if` 分支外，导致成功路径误报故障并退出、失败路径跳过日志提取；后端前台运行阻塞取证 | §6 场景 E 步骤 3、3a、3b |
 
 ---
 
@@ -565,43 +572,68 @@ pip list | grep -i gunicorn  # 应为空
 
 > ⚠️ 场景 A 中显式声明 sniffio 后可导入，**不能证明原始环境缺失 sniffio 的原因**。以下根因验证必须在**未修改的原始 `requirements.txt`** 上执行。
 
-**场景 E：原始依赖声明的 sniffio 传递依赖验证**
+**场景 E：原始依赖声明的 sniffio 传递依赖验证（第四轮审查修复版）**
+
+> **修复说明**：本场景代码已响应第四轮审查意见，修复了以下两个 P2 问题：
+> - **P2-1**：使用 `${PIPESTATUS[0]}` 替代 `$?`，确保捕获的是 `pip` 的真实退出码而非管道末尾 `tee` 的退出码
+> - **P2-2**：将安装失败时的日志提取与 `exit 1` 完整移入 `if` 失败分支内，成功分支继续执行依赖取证；后端服务改为后台运行并在取证完成后停止，避免前台运行阻塞终端
+
 ```bash
+#!/bin/bash
+# ============================================================
+# 场景 E：原始依赖声明的 sniffio 传递依赖验证
+# 必须在未修改的原始 requirements.txt 上执行
+# ============================================================
+
 # 1. 新建干净虚拟环境（与原始报错环境一致的 Python/pip 版本）
 python -m venv venv-original
-source venv-original/bin/activate
+source venv-original/bin/activate  # Windows: venv-original\Scripts\activate
 
 # 2. 安装原始（未修改的）requirements.txt，记录完整输出和退出状态
+#    ⚠️ P2-1 修复：使用 ${PIPESTATUS[0]} 捕获 pip 的退出码，
+#       而非 $?（$? 记录的是管道末尾 tee 的退出码）
 pip install -r backend/requirements.txt 2>&1 | tee install_log.txt
-INSTALL_EXIT_CODE=$?
+INSTALL_EXIT_CODE=${PIPESTATUS[0]}
 
-# 3. ⚠️ 安装成功前置检查：必须安装成功后才能继续归因
-#    若退出码非 0（如出现 resolution-too-deep），则环境不完整，
-#    停止 sniffio 缺失归因，单独记录为依赖解析故障，跳至步骤 3b
-if [ $INSTALL_EXIT_CODE -ne 0 ]; then
-  echo "安装失败（退出码 $INSTALL_EXIT_CODE），环境不完整，不进行 sniffio 缺失归因"
-  echo "需单独排查依赖解析故障（见 install_log.txt）"
+# 3. 安装成功前置检查：必须安装成功后才能继续 sniffio 缺失归因
+#    ⚠️ P2-2 修复：失败时的日志提取与 exit 1 全部移入本 if 分支内，
+#       成功分支不执行任何退出操作，继续向下执行步骤 4-6
+if [ "$INSTALL_EXIT_CODE" -ne 0 ]; then
+  echo "[ERROR] 安装失败（退出码 $INSTALL_EXIT_CODE），环境不完整，不进行 sniffio 缺失归因"
+  echo "[INFO] 提取安装日志中的错误信息..."
+  grep -i "error\|resolution" install_log.txt | head -20
+  echo "[INFO] 完整日志见 install_log.txt，需单独排查依赖解析故障"
   exit 1
 fi
 
-# 3a. 安装成功：启动后端，复现 sniffio 缺失异常（需捕获完整堆栈）
-python backend/run_dev_enhanced.py 2>&1 | tee startup_log.txt
-#    若出现 ModuleNotFoundError: No module named 'sniffio'，记录完整 traceback
-#    若未出现异常，则 sniffio 缺失问题不可复现，需重新确认原始报错场景
+# ---- 以下为安装成功后的取证流程 ----
 
-# 3b. （仅当步骤 2 安装失败时执行）记录解析故障详情，不继续后续归因
-echo "依赖解析故障，退出码: $INSTALL_EXIT_CODE"
-grep -i "error\|resolution" install_log.txt | head -20
-exit 1
+# 3a. 启动后端（后台运行），复现 sniffio 缺失异常（需捕获完整堆栈）
+#     注意：后端服务以前台模式运行会阻塞当前终端，
+#     可选方案一（本脚本采用）：后台运行并记录 PID，取证完成后 kill 停止
+#     可选方案二：在另一终端中执行 python backend/run_dev_enhanced.py，
+#                 本终端继续执行步骤 4-6 的取证命令
+echo "[INFO] 安装成功，启动后端服务（后台运行）..."
+python backend/run_dev_enhanced.py > startup_log.txt 2>&1 &
+BACKEND_PID=$!
+sleep 5  # 等待服务启动完成
+
+#     检查启动日志：
+#     - 若出现 ModuleNotFoundError: No module named 'sniffio'，记录完整 traceback
+#     - 若未出现异常，则 sniffio 缺失问题不可复现，需重新确认原始报错场景
+echo "[INFO] 后端启动日志（最后 30 行）："
+tail -n 30 startup_log.txt
 
 # 4. 记录实际安装的 zhipuai 版本及完整传递依赖树
+echo "[INFO] 采集 zhipuai 依赖树..."
 pip show zhipuai
-pip install pipdeptree
+pip install pipdeptree -q
 pipdeptree -p zhipuai  # 查看 zhipuai 的完整传递依赖，确认 sniffio 是否在其中
 
 # 5. 检查 sniffio 是否实际被安装（可能由其他间接依赖引入）
+echo "[INFO] 检查 sniffio 安装状态..."
 pip show sniffio
-python -c "import sniffio; print('sniffio available')" 2>&1
+python -c "import sniffio; print('sniffio available, version:', sniffio.__version__)" 2>&1
 
 # 6. 结合启动异常堆栈和依赖树判断缺失来源：
 #    - 若启动报 ModuleNotFoundError 且 pip show sniffio 未安装：
@@ -610,11 +642,21 @@ python -c "import sniffio; print('sniffio available')" 2>&1
 #      若都没有，则确认原始 requirements.txt 确实缺少 sniffio 声明
 #    - 若启动未报异常但 pip show sniffio 已安装：
 #      确认是哪个包作为直接/间接依赖引入了 sniffio，原始缺失可能来自其他安装方式
+echo "[INFO] 请结合 startup_log.txt 和上述依赖树输出，人工判断 sniffio 缺失来源"
+
+# 7. 取证完成后停止后端服务（方案一：后台运行时需手动停止）
+echo "[INFO] 停止后端服务..."
+kill "$BACKEND_PID" 2>/dev/null
+wait "$BACKEND_PID" 2>/dev/null
+
+echo "[DONE] 根因验证取证完成"
+echo "  - 安装日志: install_log.txt"
+echo "  - 启动日志: startup_log.txt"
 ```
 
 **根因验证需记录的信息：**
 - Python 版本、pip 版本
-- `pip install` 退出码（0=成功，非0=解析故障）
+- `pip install` 退出码（0=成功，非0=解析故障）— **必须使用 `${PIPESTATUS[0]}` 捕获，确保为 pip 真实退出码**
 - 若安装失败：完整错误日志（`install_log.txt`），单独记录为依赖解析故障，不进行 sniffio 归因
 - 若安装成功：完整包列表及版本（`pip freeze`）
 - 启动后端的完整输出（`startup_log.txt`），是否复现 `ModuleNotFoundError` 及完整 traceback
@@ -637,6 +679,8 @@ python -c "import sniffio; print('sniffio available')" 2>&1
 Caifusi 财赋思是一个结构清晰的 React + Flask AI 金融教育应用，核心功能（AI 教练对话）已验证可正常运行。项目当前处于 `v0.1.0` 早期阶段，认证和数据持久化仍为开发态 mock，依赖管理存在一些兼容性问题。
 
 **最优先的改进方向**是拆分 `requirements.txt` 的可选依赖（将 `firebase-admin`、`google-generativeai`、`gunicorn` 按功能独立为可选文件，并显式声明 `sniffio`）。该方案设计上能显著提升新用户的上手体验，但**风险等级和实际收益需在完成 §6 所列的干净环境全量验证后才能确认**，当前不宜宣称"风险极低"。
+
+**第四轮审查修复**已完成：场景 E 的根因验证脚本修复了 pip 退出码误判（P2-1）和失败分支不可达（P2-2）两个问题，验证脚本现在可以正确区分安装成功/失败场景，并在成功路径上完整执行依赖树采集和 sniffio 状态取证。
 
 ---
 
