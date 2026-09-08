@@ -47,6 +47,17 @@ python3 -m pip install -r backend/requirements.txt
 npm ci
 ```
 
+`backend/requirements.txt` 为核心依赖。如需 Firebase 存储或 Gemini 模型，追加对应可选文件：
+
+```bash
+# Firebase 存储
+pip install -r backend/requirements.txt -r backend/requirements-firebase.txt
+# Gemini 模型
+pip install -r backend/requirements.txt -r backend/requirements-gemini.txt
+```
+
+本地开发不需要安装 `requirements-prod.txt`（gunicorn），使用 Flask 开发服务器即可。
+
 ### 配置环境变量
 
 后端脚本会读取仓库根目录的 `.env`：
@@ -182,8 +193,11 @@ cd /srv/caifusi
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
+# 核心依赖 + 生产 WSGI 服务器（gunicorn）
+python -m pip install -r backend/requirements.txt -r backend/requirements-prod.txt
 ```
+
+> 生产部署使用 Gunicorn，必须追加 `requirements-prod.txt`。如果同时使用 Firebase 存储，再追加 `-r backend/requirements-firebase.txt`。
 
 ### 准备生产环境变量
 
@@ -309,7 +323,7 @@ curl https://api.example.com/api/health
 cd /srv/caifusi
 git pull --ff-only origin <deploy-branch>
 source .venv/bin/activate
-python -m pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements.txt -r backend/requirements-prod.txt
 sudo systemctl restart caifusi-api
 curl https://api.example.com/api/health
 ```
