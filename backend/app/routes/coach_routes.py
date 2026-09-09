@@ -52,6 +52,10 @@ def chat():
             logger.error("请求数据为空")
             return jsonify({'status': 'error', 'message': '请求数据为空'}), 400
 
+        if not isinstance(data, dict):
+            logger.error("请求体必须为JSON对象")
+            return jsonify({'status': 'error', 'message': '请求体必须为JSON对象'}), 400
+
         message = data.get('message')
         if not isinstance(message, str) or not message.strip():
             logger.error("消息内容必须为非空字符串")

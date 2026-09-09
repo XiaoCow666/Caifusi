@@ -1,13 +1,14 @@
 """
 coach_routes /chat 接口输入验证回归测试
 ================================================
-背景：/chat 接口原实现仅检查 'message' key 是否存在，未校验类型与非空。
-      当 message 为 None / 数字 / 空字符串时，日志行 data.get('message')[:50]
-      会抛出 TypeError，被外层 except 捕获后返回 500（而非语义正确的 400）。
+背景：/chat 接口原实现仅检查 'message' key 是否存在，未校验请求体类型与
+      message 类型/非空。malformed 请求会在日志行或 data.get() 处抛异常，
+      被外层 except 捕获后返回 500（而非语义正确的 400）。
 本测试固化修复后的约定：
-  · 非字符串 / 空 / 纯空白 message → 400 + 明确中文提示
+  · 空 body / 非法 JSON → 400
+  · 顶层非对象 JSON（数组/字符串/数字/布尔）→ 400，且 AI 服务不被调用
+  · message 非字符串 / 空 / 纯空白 → 400
   · 合法 message → 透传给 AI 服务并返回业务包络
-  · 空请求体 / 非 JSON → 400
 运行：cd backend && python -m pytest tests/test_coach_routes.py -v
 """
 import sys
@@ -66,6 +67,42 @@ class TestChatInputValidation:
         body = resp.get_json()
         assert body['status'] == 'error'
         assert '请求数据为空' in body['message']
+
+    def test_top_level_array_returns_400(self, client, app):
+        """顶层 JSON 数组 → 400，AI 服务不被调用（修复前 data.get 抛 AttributeError → 500）。"""
+        resp = client.post('/api/coach/chat', json=['hello', 'world'])
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body['status'] == 'error'
+        assert 'JSON对象' in body['message']
+        coach_routes.zhipuai_service.get_chat_response.assert_not_called()
+
+    def test_top_level_string_returns_400(self, client, app):
+        """顶层 JSON 字符串 → 400，AI 服务不被调用。"""
+        resp = client.post('/api/coach/chat', json='just a string')
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body['status'] == 'error'
+        assert 'JSON对象' in body['message']
+        coach_routes.zhipuai_service.get_chat_response.assert_not_called()
+
+    def test_top_level_number_returns_400(self, client, app):
+        """顶层 JSON 数字 → 400，AI 服务不被调用。"""
+        resp = client.post('/api/coach/chat', json=42)
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body['status'] == 'error'
+        assert 'JSON对象' in body['message']
+        coach_routes.zhipuai_service.get_chat_response.assert_not_called()
+
+    def test_top_level_boolean_returns_400(self, client, app):
+        """顶层 JSON 布尔值 → 400，AI 服务不被调用。"""
+        resp = client.post('/api/coach/chat', json=True)
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body['status'] == 'error'
+        assert 'JSON对象' in body['message']
+        coach_routes.zhipuai_service.get_chat_response.assert_not_called()
 
     def test_missing_message_key_returns_400(self, client):
         """缺少 message key → 400 消息内容必须为非空字符串。"""
