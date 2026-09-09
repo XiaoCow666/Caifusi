@@ -1,9 +1,10 @@
 import os
-import pymysql
-import pymysql.cursors
 import logging
 import json
 from flask import current_app
+
+# pymysql 采用延迟导入：仅在实际建立 MySQL 连接时才导入，
+# 使 DB_TYPE=memory（默认开发模式）不需要安装 pymysql 也能启动后端。
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -38,6 +39,11 @@ class MySQLHelper:
     @classmethod
     def get_connection(cls, select_db=True):
         """建立数据库连接"""
+        try:
+            import pymysql
+            import pymysql.cursors
+        except ImportError:
+            raise ImportError('MySQL 模式需要 pymysql 库，请运行: pip install pymysql cryptography')
         config = cls.get_db_config()
         try:
             conn = pymysql.connect(

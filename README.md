@@ -116,6 +116,58 @@ npm start
 
 开发环境会把 API 请求代理到 <code>http://localhost:5001</code>。如果前端部署到 GitHub Pages 或其他静态托管平台，构建时设置 <code>REACT_APP_API_URL</code>，并在后端的 <code>CORS_ALLOWED_ORIGINS</code> 中加入前端域名。没有远程 API 时，公开静态页面仍可以打开，但 AI 教练不能正常工作。
 
+## 常见启动问题
+
+### 推荐使用虚拟环境
+
+为避免与系统 Python 环境冲突，推荐在项目根目录创建独立虚拟环境：
+
+~~~powershell
+# 创建虚拟环境（只需一次）
+python -m venv .venv
+
+# 激活虚拟环境
+.venv\Scripts\Activate.ps1   # PowerShell
+.venv\Scripts\activate.bat   # CMD
+
+# 后续所有 pip / python 命令都在虚拟环境中执行
+python -m pip install -r backend/requirements.txt
+python backend/run_dev_enhanced.py
+~~~
+
+不激活虚拟环境时，也可以直接用虚拟环境的解释器执行：
+
+~~~powershell
+.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+.venv\Scripts\python.exe backend/run_dev_enhanced.py
+~~~
+
+### 问题排查
+
+| 报错信息 | 原因 | 解决方法 |
+| --- | --- | --- |
+| `ModuleNotFoundError: No module named 'sniffio'` | 旧版 requirements.txt 未显式声明 zhipuai SDK 的传递依赖 | 确保使用最新版 `backend/requirements.txt`（已包含 `sniffio>=1.3.0`），重新执行 `pip install -r backend/requirements.txt` |
+| `ModuleNotFoundError: No module named 'pymysql'` | MySQL 模式需要 pymysql 驱动 | 默认 `DB_TYPE=memory` 开发模式已不再硬依赖 pymysql（采用延迟导入），可直接启动；若使用 `DB_TYPE=mysql`，请执行 `pip install pymysql cryptography` |
+| Dashboard API 返回 `401 需要授权令牌` | DEV_MODE 默认关闭，认证装饰器拒绝未认证请求 | 本地开发时在 `.env` 中设置 `DEV_MODE=true`；生产环境必须保持默认关闭（`false`），使用真实认证 |
+| `Address already in use` / 端口 5001 被占用 | 其他进程占用了 5001 端口 | 执行 `netstat -ano | findstr :5001` 找到占用进程 PID，再执行 `taskkill /PID <PID> /F` 结束进程；或修改启动脚本中的端口号 |
+| `ImportError: firebase_admin` | 未安装 Firebase Admin SDK（仅 Firebase 模式需要） | 默认 memory/mysql 模式不需要 firebase_admin；若使用 `DB_TYPE=firebase`，请执行 `pip install -r backend/requirements-firebase.txt` |
+| AI 教练返回 API 调用错误 | 未配置有效智谱 API Key | 在 `.env` 中填写有效的 `ZHIPUAI_API_KEY`；确认 Key 未过期且有可用额度 |
+
+### 验证后端是否正常启动
+
+启动后端后，在浏览器或终端访问以下地址验证：
+
+~~~powershell
+# 健康检查（应返回 200 + {"status":"healthy"}）
+curl http://127.0.0.1:5001/api/health
+
+# AI 教练服务状态（应返回 200 + {"status":"ok"}）
+curl http://127.0.0.1:5001/api/coach/health
+
+# 评估接口（应返回 200 + {"assessment":null}）
+curl http://127.0.0.1:5001/api/assessment/latest
+~~~
+
 ## 部署路线
 
 | 目标 | 方式 | 说明 |
