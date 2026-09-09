@@ -149,7 +149,7 @@ python backend/run_dev_enhanced.py
 | `ModuleNotFoundError: No module named 'sniffio'` | 旧版 requirements.txt 未显式声明 zhipuai SDK 的传递依赖 | 确保使用最新版 `backend/requirements.txt`（已包含 `sniffio>=1.3.0`），重新执行 `pip install -r backend/requirements.txt` |
 | `ModuleNotFoundError: No module named 'pymysql'` | MySQL 模式需要 pymysql 驱动 | 默认 `DB_TYPE=memory` 开发模式已不再硬依赖 pymysql（采用延迟导入），可直接启动；若使用 `DB_TYPE=mysql`，请执行 `pip install pymysql cryptography` |
 | Dashboard API 返回 `401 需要授权令牌` | DEV_MODE 默认关闭，认证装饰器拒绝未认证请求 | 本地开发时在 `.env` 中设置 `DEV_MODE=true`；生产环境必须保持默认关闭（`false`），使用真实认证 |
-| `Address already in use` / 端口 5001 被占用 | 其他进程占用了 5001 端口 | 执行 `netstat -ano | findstr :5001` 找到占用进程 PID，再执行 `taskkill /PID <PID> /F` 结束进程；或修改启动脚本中的端口号 |
+| `Address already in use` / 端口 5001 被占用 | 其他进程占用了 5001 端口 | 先执行 `netstat -ano | findstr :5001` 找到占用进程 PID，确认对应程序后正常关闭；确认可终止时再用 `taskkill /PID <PID> /F` 强制结束；或修改启动脚本中的端口号 |
 | `ImportError: firebase_admin` | 未安装 Firebase Admin SDK（仅 Firebase 模式需要） | 默认 memory/mysql 模式不需要 firebase_admin；若使用 `DB_TYPE=firebase`，请执行 `pip install -r backend/requirements-firebase.txt` |
 | AI 教练返回 API 调用错误 | 未配置有效智谱 API Key | 在 `.env` 中填写有效的 `ZHIPUAI_API_KEY`；确认 Key 未过期且有可用额度 |
 
@@ -164,7 +164,7 @@ curl http://127.0.0.1:5001/api/health
 # AI 教练服务状态（应返回 200 + {"status":"ok"}）
 curl http://127.0.0.1:5001/api/coach/health
 
-# 评估接口（应返回 200 + {"assessment":null}）
+# 评估接口（应返回 200；尚无评估数据时为 {"assessment":null}，已有数据时返回实际评估结果）
 curl http://127.0.0.1:5001/api/assessment/latest
 ~~~
 

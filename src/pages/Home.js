@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Container, Row, Col, Card, Button, Carousel, Badge } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Badge } from 'react-bootstrap';
 import { FaArrowRight, FaBrain, FaChartLine, FaRobot, FaShieldAlt, FaComments, FaChartBar } from 'react-icons/fa';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import Typed from 'typed.js';
@@ -59,121 +59,6 @@ const EnhancedBadge = ({ children, bg, className = '' }) => {
   );
 };
 
-// 投资表现跟随组件
-const InvestmentPerformance = ({ userData = {} }) => {
-  const [isVisible, setIsVisible] = useState(true);
-  const [position, setPosition] = useState({ top: 111.111, right: 20 });
-  const [targetPosition, setTargetPosition] = useState({ top: 111.111, right: 20 });
-
-  // 模拟用户数据 - 实际项目中应从userData获取
-  const riskProfile = userData.riskProfile || "均衡型";
-  const progressValue = userData.progressValue || 75;
-
-  // 平滑过渡到目标位置
-  useEffect(() => {
-    if (position.top === targetPosition.top) return;
-
-    const animationFrame = requestAnimationFrame(() => {
-      // 使用适中的系数0.25来平滑过渡
-      const newTop = position.top + (targetPosition.top - position.top) * 0.25;
-      setPosition({ top: newTop, right: position.right });
-    });
-
-    return () => cancelAnimationFrame(animationFrame);
-  }, [position, targetPosition]);
-
-  useEffect(() => {
-    // 获取导航栏和页脚元素
-    const navbar = document.querySelector('.navbar-wrapper');
-    const footer = document.querySelector('.footer-wrapper');
-
-    // 滚动事件处理函数
-    const handleScroll = () => {
-      const scrollY = window.scrollY;
-      // 确保组件始终可见
-      setIsVisible(true);
-
-      // 获取导航栏底部位置（如果存在）
-      const navbarBottom = navbar ? navbar.getBoundingClientRect().bottom : 0;
-
-      // 获取页脚顶部位置（如果存在）
-      const footerTop = footer ? footer.getBoundingClientRect().top : window.innerHeight;
-
-      // 计算组件的高度（用于判断底部边界）
-      const componentHeight = 150; // 估算高度，可以根据实际情况调整
-
-      // 计算新的顶部位置，直接基于滚动位置
-      let newTop = scrollY + 111.111;
-
-      // 确保不小于导航栏底部
-      newTop = Math.max(navbarBottom + 10, newTop);
-
-      // 确保不大于页脚顶部减去组件高度
-      if (footerTop < window.innerHeight) {
-        newTop = Math.min(newTop, footerTop - componentHeight - 10);
-      }
-
-      // 更新目标位置，而不是直接更新位置
-      setTargetPosition({ top: newTop, right: 20 });
-    };
-
-    // 使用requestAnimationFrame优化滚动性能
-    let ticking = false;
-    const onScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          handleScroll();
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    window.addEventListener('scroll', onScroll);
-    window.addEventListener('resize', handleScroll);
-
-    // 初始执行一次以设置正确的初始位置
-    handleScroll();
-
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', handleScroll);
-    };
-  }, []);
-
-  if (!isVisible) return null;
-
-  return (
-    <div
-      className="bg-white rounded-4 shadow-lg p-3 position-fixed animate__animated animate__fadeInUp"
-      style={{
-        maxWidth: '200px',
-        top: `${position.top}px`,
-        right: `${position.right}px`,
-        zIndex: 1000,
-        transition: 'top 0.05s linear'
-      }}
-    >
-      <div className="d-flex align-items-center mb-2">
-        <FaChartLine className="text-success fs-3 me-2" />
-        <span className="fw-bold">投资表现</span>
-      </div>
-      <div className="d-flex justify-content-between">
-        <small className="text-muted">风险偏好:</small>
-        <small className="fw-bold text-end">{riskProfile}</small>
-      </div>
-      <div className="progress mt-2 mb-2" style={{ height: '6px' }}>
-        <div className="progress-bar bg-success" style={{ width: `${progressValue}%` }}></div>
-      </div>
-      <div className="d-flex justify-content-between">
-        <small className="text-muted">成长路径:</small>
-        <small className="fw-bold text-end">稳步提升中</small>
-      </div>
-    </div>
-  );
-};
-
-// 主题组件
 const Home = () => {
   const { currentUser } = useAuth();
   const [fadeIn, setFadeIn] = useState(false);
@@ -182,7 +67,6 @@ const Home = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const totalSlides = 5; // 总的评价数量
   const slideIntervalRef = useRef(null);
-  const testimonialTrackRef = useRef(null);
 
   // 添加首屏加载动画
   useEffect(() => {
@@ -239,7 +123,7 @@ const Home = () => {
         clearInterval(slideIntervalRef.current);
       }
     };
-  }, [currentSlide]);
+  }, [currentSlide]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 启动自动轮播
   const startSlideInterval = () => {

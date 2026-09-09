@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { checkHealth } from './services/api';
 
 // 导入样式
 import './mobile-styles.css'; // 添加移动端样式
@@ -31,7 +30,7 @@ import Layout from './components/Layout';
 
 // API连接状态组件
 const ApiStatusIndicator = () => {
-  const [apiStatus, setApiStatus] = useState('connected'); // 默认假设已连接，用于调试
+  const [apiStatus] = useState('connected'); // 默认假设已连接，用于调试
   
   useEffect(() => {
     // 移除API检查，用于调试
