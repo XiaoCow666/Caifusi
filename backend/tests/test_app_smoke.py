@@ -8,27 +8,31 @@ external service.
 import os
 import sys
 import unittest
+from importlib import import_module
 from pathlib import Path
+from unittest.mock import patch
 
 
-# Allow the test command to be run from the repository root without requiring
-# a package installation or changing the application's import layout.
+# Resolve the backend package without requiring a package installation or
+# changing the application's import layout.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
 
-# Keep this smoke test deterministic and prevent an inherited developer
-# environment from initializing MySQL or another persistent backend.
-os.environ["DB_TYPE"] = "memory"
 
-from app import create_app  # noqa: E402
+def build_test_app():
+    """Create the app with temporary test-only environment and import state."""
+    with patch.dict(os.environ, {"DB_TYPE": "memory"}):
+        with patch.object(sys, "path", [str(BACKEND_ROOT), *sys.path]):
+            create_app = import_module("app").create_app
+            app = create_app()
+
+    app.config.update(TESTING=True)
+    return app
 
 
 class AppSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = create_app()
-        cls.app.config.update(TESTING=True)
+        cls.app = build_test_app()
         cls.client = cls.app.test_client()
 
     def test_health_endpoint_returns_healthy(self):
@@ -38,20 +42,33 @@ class AppSmokeTest(unittest.TestCase):
         self.assertEqual(response.get_json().get("status"), "healthy")
 
     def test_expected_core_routes_are_registered(self):
-        registered_routes = {rule.rule for rule in self.app.url_map.iter_rules()}
-        expected_routes = {
-            "/api/coach/chat",
-            "/api/coach/health",
-            "/api/assessment/submit",
-            "/api/assessment/latest",
-            "/api/assessment/history",
-            "/api/dashboard/overview",
-            "/api/dashboard/goals",
+        registered_methods = {}
+        for rule in self.app.url_map.iter_rules():
+            registered_methods.setdefault(rule.rule, set()).update(rule.methods)
+
+        expected_methods = {
+            "/api/coach/chat": {"POST"},
+            "/api/coach/health": {"GET"},
+            "/api/assessment/submit": {"POST"},
+            "/api/assessment/latest": {"GET"},
+            "/api/assessment/history": {"GET"},
+            "/api/dashboard/overview": {"GET"},
+            "/api/dashboard/goals": {"GET", "POST"},
         }
 
-        self.assertTrue(
-            expected_routes.issubset(registered_routes),
-            msg=f"Missing routes: {sorted(expected_routes - registered_routes)}",
+        missing_routes = sorted(set(expected_methods) - set(registered_methods))
+        missing_methods = {
+            route: sorted(methods - registered_methods.get(route, set()))
+            for route, methods in expected_methods.items()
+            if methods - registered_methods.get(route, set())
+        }
+
+        self.assertFalse(
+            missing_routes or missing_methods,
+            msg=(
+                f"Missing routes: {missing_routes}; "
+                f"missing methods: {missing_methods}"
+            ),
         )
 
 
