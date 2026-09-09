@@ -91,7 +91,7 @@ Copy-Item .env.example .env
 ### 2. 安装依赖并启动
 
 ~~~powershell
-# 终端 A：后端 API
+# 终端 A：后端 API（核心依赖，包含智谱 AI）
 python -m pip install -r backend/requirements.txt
 python backend/run_dev_enhanced.py
 
@@ -99,6 +99,16 @@ python backend/run_dev_enhanced.py
 npm install
 npm start
 ~~~
+
+`backend/requirements.txt` 只包含核心运行依赖。以下功能需要按需追加可选依赖文件：
+
+| 需要的功能 | 追加安装命令 |
+| --- | --- |
+| Firebase 存储（<code>DB_TYPE=firebase</code>） | <code>pip install -r backend/requirements.txt -r backend/requirements-firebase.txt</code> |
+| Google Gemini 模型 | <code>pip install -r backend/requirements.txt -r backend/requirements-gemini.txt</code> |
+| 生产部署 WSGI（gunicorn，仅 Unix） | <code>pip install -r backend/requirements.txt -r backend/requirements-prod.txt</code> |
+
+> <code>gunicorn</code> 仅支持 Unix 类系统，Windows 用户不需要也不应安装 <code>requirements-prod.txt</code>。
 
 后端默认地址是 <http://localhost:5001>，前端默认地址是 <http://localhost:3000>。Windows 也可以运行 [快速启动.cmd](快速启动.cmd)；这个脚本会读取 <code>.env.local</code>。
 

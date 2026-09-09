@@ -1,0 +1,4 @@
+# 可选依赖 — Firebase 存储功能
+# 仅当 DB_TYPE=firebase 或使用 firestore_service.py 时安装
+# 安装方式：pip install -r requirements.txt -r requirements-firebase.txt
+firebase-admin>=6.5.0
