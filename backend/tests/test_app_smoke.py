@@ -43,13 +43,24 @@ class AppSmokeTest(unittest.TestCase):
         self.assertEqual(response.get_json().get("status"), "healthy")
 
     def test_app_setup_restores_process_state(self):
-        original_db_type = os.environ.get("DB_TYPE")
-        original_sys_path = sys.path
+        for initial_db_type in (None, "mysql"):
+            with self.subTest(initial_db_type=initial_db_type):
+                with patch.dict(os.environ):
+                    if initial_db_type is None:
+                        os.environ.pop("DB_TYPE", None)
+                    else:
+                        os.environ["DB_TYPE"] = initial_db_type
 
-        build_test_app()
+                    original_sys_path = sys.path
+                    build_test_app()
 
-        self.assertEqual(os.environ.get("DB_TYPE"), original_db_type)
-        self.assertIs(sys.path, original_sys_path)
+                    if initial_db_type is None:
+                        self.assertNotIn("DB_TYPE", os.environ)
+                    else:
+                        self.assertEqual(
+                            os.environ.get("DB_TYPE"), initial_db_type
+                        )
+                    self.assertIs(sys.path, original_sys_path)
 
     def test_app_setup_restores_process_state_when_creation_fails(self):
         original_db_type = os.environ.get("DB_TYPE")

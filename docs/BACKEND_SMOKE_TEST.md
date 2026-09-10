@@ -11,7 +11,7 @@ python -m pip install -r backend/requirements.txt
 python -X utf8 -m unittest discover -s backend/tests -v
 ```
 
-`-X utf8` 用于避免 Windows 默认代码页无法输出启动日志中的 Unicode 符号；它只影响测试进程的文本输出，不改变应用逻辑。
+`-X utf8` 启用 Python UTF-8 模式，会影响测试进程的默认文本编码；这里用于避免 Windows 默认代码页无法输出启动日志中的 Unicode 符号，不改变应用业务逻辑。
 
 测试默认使用 `DB_TYPE=memory`，不会初始化或写入 MySQL；测试用例只访问本地 Flask `test_client`，不会调用智谱 AI、Firebase 或其他外部服务。App Factory 在注册路由时仍可能导入可选集成模块，因此“不调用外部服务”是当前测试调用范围和应用实现下的事实，不是对所有初始化代码或生产环境的推断。
 
