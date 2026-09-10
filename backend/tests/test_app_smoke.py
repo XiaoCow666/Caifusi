@@ -1,8 +1,9 @@
 """Small, dependency-backed smoke tests for the Flask application factory.
 
 These tests intentionally exercise only route registration and the local health
-endpoint. They do not call the AI provider, Firebase, MySQL, or any other
-external service.
+endpoint. The test cases do not call the AI provider, Firebase, MySQL, or any
+other external service; app initialization may still import optional integration
+modules while registering routes.
 """
 
 import os
@@ -19,7 +20,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def build_test_app():
-    """Create the app with temporary test-only environment and import state."""
+    """Create the app with temporary test-only environment and import path."""
     with patch.dict(os.environ, {"DB_TYPE": "memory"}):
         with patch.object(sys, "path", [str(BACKEND_ROOT), *sys.path]):
             create_app = import_module("app").create_app
@@ -40,6 +41,15 @@ class AppSmokeTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json().get("status"), "healthy")
+
+    def test_app_setup_restores_process_state(self):
+        original_db_type = os.environ.get("DB_TYPE")
+        original_sys_path = sys.path
+
+        build_test_app()
+
+        self.assertEqual(os.environ.get("DB_TYPE"), original_db_type)
+        self.assertIs(sys.path, original_sys_path)
 
     def test_expected_core_routes_are_registered(self):
         registered_methods = {}
