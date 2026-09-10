@@ -51,6 +51,22 @@ class AppSmokeTest(unittest.TestCase):
         self.assertEqual(os.environ.get("DB_TYPE"), original_db_type)
         self.assertIs(sys.path, original_sys_path)
 
+    def test_app_setup_restores_process_state_when_creation_fails(self):
+        original_db_type = os.environ.get("DB_TYPE")
+        original_sys_path = sys.path
+        app_module = import_module("app")
+
+        with patch.object(
+            app_module,
+            "create_app",
+            side_effect=RuntimeError("simulated app factory failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "simulated app factory failure"):
+                build_test_app()
+
+        self.assertEqual(os.environ.get("DB_TYPE"), original_db_type)
+        self.assertIs(sys.path, original_sys_path)
+
     def test_expected_core_routes_are_registered(self):
         registered_methods = {}
         for rule in self.app.url_map.iter_rules():

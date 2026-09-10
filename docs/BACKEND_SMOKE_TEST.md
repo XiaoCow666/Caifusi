@@ -31,7 +31,7 @@ py -3 -m venv $venvPath
 - `GET /api/health` 返回 HTTP 200，且响应状态为 `healthy`；
 - 教练、评估和 Dashboard 的核心路由仍由 App Factory 注册，且关键 HTTP 方法仍然存在；
 - 应用创建后可以启用 `TESTING` 配置，不要求真实 API Key、Firebase 私钥或数据库凭据；
-- 测试辅助函数退出后恢复 `DB_TYPE` 和 `sys.path` 的进程状态。
+- 测试辅助函数在正常和 App Factory 异常路径退出后，都恢复 `DB_TYPE` 和 `sys.path` 的进程状态。
 
 ## 事实边界
 
