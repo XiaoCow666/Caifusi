@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import InfoPageHeader from './InfoPageHeader';
 import { FaFileAlt, FaShieldAlt, FaCookieBite, FaHandshake } from 'react-icons/fa';
 
@@ -395,12 +396,12 @@ Cookie是包含少量数据的文件，由网站存储在您的设备上。它�
             >
               联系法务团队
             </a>
-            <a 
-              href="/info/contact" 
+            <Link
+              to="/info/contact"
               className="inline-block bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-5 py-3 rounded-md transition-colors text-center"
             >
               联系客服
-            </a>
+            </Link>
           </div>
         </div>
       </div>
