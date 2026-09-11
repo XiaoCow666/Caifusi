@@ -73,6 +73,23 @@ def submit_assessment(user_info):
     user_id = user_info['uid']
 
     scores = assessment_data.get('scores', {})
+
+    # 校验 scores 为「字段名 -> 数值」的对象：修复前 scores 为数组时 .values()
+    # 抛 AttributeError，取值为字符串/None 时 sum() 抛 TypeError——均未被捕获，
+    # 被外层兜成 500。与 coach /chat 输入校验（PR #12）一致：畸形输入返回 400。
+    if not isinstance(scores, dict):
+        return jsonify({"error": "scores 必须为对象"}), 400
+
+    non_numeric = [
+        key for key, value in scores.items()
+        # bool 是 int 的子类，需显式排除 True/False
+        if isinstance(value, bool) or not isinstance(value, (int, float))
+    ]
+    if non_numeric:
+        return jsonify({
+            "error": f"scores 必须全部为数值字段: {', '.join(sorted(non_numeric))}"
+        }), 400
+
     total_score = sum(scores.values()) / len(scores) if scores else 0
 
     # Build complete assessment with percentage scores for history display
@@ -144,7 +161,14 @@ def get_history(user_info):
     ordered by time (newest first). Used by the frontend history view.
     """
     user_id = user_info['uid']
-    limit = min(int(request.args.get('limit', 50)), 100)
+    limit_raw = request.args.get('limit', '50')
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        # 修复前 int('abc') 抛 ValueError 未捕获 -> 500；畸形输入应返回 400
+        return jsonify({"error": "limit 参数必须为整数"}), 400
+    # 上界与旧实现一致收敛到 100；下界收敛到 1，避免负数透传到存储层
+    limit = max(1, min(limit, 100))
 
     try:
         uds = _get_user_data_service()
