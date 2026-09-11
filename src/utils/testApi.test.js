@@ -105,13 +105,15 @@ describe('testCoachChat：委托 apiService 且保留载荷形状', () => {
     apiService.sendMessageToCoach.mockReset();
   });
 
-  test('成功：以既有载荷调用，并原样返回 { reply }', async () => {
+  test('成功：载荷字段 user_id 与 App/后端一致，并原样返回 { reply }', async () => {
     apiService.sendMessageToCoach.mockResolvedValue({ reply: '你好！' });
 
     await expect(testApi.testCoachChat()).resolves.toEqual({ reply: '你好！' });
+    // 后端读取的是 user_id（zhipuai_service.py），App 内聊天链路同样发送 user_id；
+    // 旧探针写 userId 会被后端忽略而落到 default_user
     expect(apiService.sendMessageToCoach).toHaveBeenCalledWith({
       message: '你好，这是一条测试消息',
-      userId: 'test_user',
+      user_id: 'test_user',
     });
   });
 

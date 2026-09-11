@@ -64,9 +64,13 @@ async function checkHealth() {
 async function testCoachChat() {
   // 与全站一致走 apiService.sendMessageToCoach：请求由 axios 实例发出
   // （baseURL 已含 /api，自动携带 localStorage 中的 authToken）
+  //
+  // 字段名 user_id 为 snake_case：与 App 内聊天链路（CoachChat.js）及后端读取处
+  // （zhipuai_service.py 的 data.get('user_id', 'default_user')）一致。
+  // 原实现写的是 userId，后端取不到会落到 'default_user'，探针并未真正指定用户。
   const payload = {
     message: '你好，这是一条测试消息',
-    userId: 'test_user',
+    user_id: 'test_user',
   };
   console.log('发送数据:', payload);
 
