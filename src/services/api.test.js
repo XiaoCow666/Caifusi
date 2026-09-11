@@ -12,12 +12,17 @@
  *         · 请求拦截器 JWT 头、响应拦截器 401 清 token（既有约定防回归）
  *
  * 运行命令：CI=true npm test -- --watchAll=false（基线 10 passed；本文件扩展后共
- *           31 条，覆盖 api.js 全部 17 个导出函数——见文末「扩展回归」段）
+ *           32 条，覆盖 api.js 全部 17 个导出函数——见文末「扩展回归」段）
  * 扩展回归（2026-09-08）：PR #3 只收敛了 sendMessageToCoach；其余导出函数
  *       （auth / user / assessment / dashboard 包装器）的“路径不拼 /api、方法/
  *       载荷透传、失败原样重抛”约定此前零测试固化。扩展段仅锁定现状约定，
- *       不改动任何实现；其中 getDashboardOverview 对 {status} 业务包络的
- *       处理与文件头规范注释存在已知偏差，以单独用例固化现状并标注跟进。
+ *       不改动任何实现；其中 getDashboardOverview 对 {status} 业务包络的处理
+ *       曾与文件头规范注释表述存在偏差（注释误要求校验 status）。
+ * 契约核实（2026-09-09）：依据 backend/app/routes/dashboard_routes.py 核对后端
+ *       /dashboard/* 实际实现：业务失败一律以 400/401/500 表达（axios 抛错），
+ *       2xx 恒为 {status:'success'} 包络 → 封装层“原样透传整个响应体、由调用方
+ *       取 .data”即为正确契约。api.js 文件头注释已同步修正，原“现状固化”用例
+ *       改为“契约锁定”，并补 dashboard 写操作 2xx 透传契约用例。
  * 说明：axios 以 jest.mock 整体替换（零网络）；拦截器分支通过捕获注册的
  *       onFulfilled/onRejected 处理器直接驱动，与浏览器行为等价。
  */
@@ -247,14 +252,28 @@ describe('业务导出函数：请求路由与错误语义回归（扩展）', (
       await expect(getDashboardOverview()).rejects.toBe(err);
     });
 
-    test('现状固化：getDashboardOverview 对 HTTP 200 + {status:error} 业务包络原样透传（不做包络校验）', async () => {
-      // ⚠️ 现状记录：文件头规范注释（api.js L23-25）要求 /dashboard/* 校验
-      //    {status} 业务包络并抛后端 message，但当前实现尚未执行该校验。
-      //    本用例只固化“现状不抛错、原样透传”，防止他人无意识改动语义；
-      //    何时按注释补包络校验，需等后端 /dashboard 契约确认后单独跟进。
-      const data = { status: 'error', message: '后端业务错误' };
+    test('契约锁定：getDashboardOverview 对 2xx {status} 包络原样透传（后端错误不随 2xx 出现）', async () => {
+      // ✅ 2026-09-09 后端契约核实：dashboard_routes.py 各路由的业务失败分支一律以
+      //    400/401/500 表达（axios 抛错、进入响应拦截器），2xx 恒为 {status:'success'}
+      //    包络 → 封装层”原样透传整个响应体、由调用方按需取 .data”即为正确契约，
+      //    不应再补 status 校验（对当前后端属不可达分支）。本用例锁定该透传语义，
+      //    防止日后误加包络校验或提前拆包。
+      const data = { status: 'success', data: { overview: {} } };
       apiInstance.get.mockResolvedValue({ data });
       await expect(getDashboardOverview()).resolves.toEqual(data);
+    });
+
+    test('契约补充：dashboard 写操作 2xx 包络透传（createGoal 201 含 data / updateGoal 200 无 data）', async () => {
+      // 后端契约（dashboard_routes.py）：POST /goals → 201 {status,message,data}；
+      // PUT /goals/:goalId → 200 {status,message}（无 data）。封装层原样透传，
+      // 不拆包、不校验 status——与上方 GET 契约锁定用例同一口径。
+      const created = { status: 'success', message: '目标创建成功', data: { title: 'x' } };
+      apiInstance.post.mockResolvedValue({ data: created });
+      await expect(createGoal({ title: 'x' })).resolves.toEqual(created);
+
+      const updated = { status: 'success', message: '目标更新成功' };
+      apiInstance.put.mockResolvedValue({ data: updated });
+      await expect(updateGoal('g-1', { title: 'y' })).resolves.toEqual(updated);
     });
   });
 });
