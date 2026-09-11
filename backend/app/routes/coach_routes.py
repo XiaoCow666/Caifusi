@@ -45,19 +45,25 @@ coach_bp = Blueprint('coach', __name__)
 def chat():
     try:
         logger.info("收到聊天请求")
-        data = request.get_json()
+        # silent=True：空请求体或非法 JSON 时返回 None（而非抛 BadRequest 被外层 except 吞成 500）
+        data = request.get_json(silent=True)
         
         if not data:
             logger.error("请求数据为空")
             return jsonify({'status': 'error', 'message': '请求数据为空'}), 400
-            
-        if 'message' not in data:
-            logger.error("缺少必要的消息内容")
-            return jsonify({'status': 'error', 'message': '缺少必要的消息内容'}), 400
-        
+
+        if not isinstance(data, dict):
+            logger.error("请求体必须为JSON对象")
+            return jsonify({'status': 'error', 'message': '请求体必须为JSON对象'}), 400
+
+        message = data.get('message')
+        if not isinstance(message, str) or not message.strip():
+            logger.error("消息内容必须为非空字符串")
+            return jsonify({'status': 'error', 'message': '消息内容必须为非空字符串'}), 400
+
         # 记录请求内容
         logger.info(f"用户ID: {data.get('user_id', 'guest')}")
-        logger.info(f"消息内容: {data.get('message')[:50]}...")
+        logger.info(f"消息内容: {message[:50]}...")
         
         # 使用智谱AI服务获取回复
         logger.info(f"正在处理聊天请求...")
