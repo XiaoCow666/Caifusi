@@ -1,9 +1,61 @@
 from flask import Blueprint, request, jsonify, current_app
 import logging
+import math
 
 logger = logging.getLogger('assessment_routes')
 
 assessment_bp = Blueprint('assessment_bp', __name__)
+
+# 每题最高选项分值（src/pages/Assessment.js 的 questions：选项 score 取值 1~4）。
+# total_score 是「1~4 平均分」，total_score_percentage 是「0~100 得分率」，
+# 两者口径不同，换算基准由该常量给出。
+MAX_OPTION_SCORE = 4.0
+
+
+def _mean_to_percentage(total_score):
+    """把 1~4 分制的平均分换算成 0~100 得分率；无法换算时返回 0.0。"""
+    try:
+        return round(float(total_score) / MAX_OPTION_SCORE * 100, 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _resolve_total_score_percentage(submitted, total_score):
+    """解析本次提交的 0~100 得分率。
+
+    优先采信前端随请求提交的 total_score_percentage：前端的分母固定为全部题数
+    （Assessment.js:431，跳过未答题目按 0 分计），与后端「按已答题目求平均」不同，
+    跳题时两者相差一个数量级，因此以前端为准。前端未提交或取值非法时，
+    按平均分换算成 0~100 回退——修复前此处直接写入 round(total_score, 1)，
+    使 1~4 尺度的值进入了语义为百分比（schema.sql:37「评分百分比/得分率」）的字段。
+    """
+    if isinstance(submitted, (int, float)) and not isinstance(submitted, bool):
+        value = float(submitted)
+        if math.isfinite(value) and 0.0 <= value <= 100.0:
+            return round(value, 1)
+
+    return _mean_to_percentage(total_score)
+
+
+def _normalize_stored_percentage(record):
+    """读取侧兼容：把历史上按 1~4 平均分错写的百分比字段换算回 0~100。
+
+    修复前落库的记录中 total_score_percentage 恒等于 round(total_score, 1)。
+    合法得分率的最小值受「每题至少 1 分」约束（10 题 → 不低于 25），而平均分不超过 4，
+    两者不可能相等，故「两值相等」是旧记录的确定性特征，不会误判修复后的新记录。
+    仅作用于响应出口，不修改底层存储，因此可随代码回滚。
+    """
+    stored = record.get('total_score_percentage')
+    mean = record.get('total_score')
+
+    if isinstance(stored, (int, float)) and not isinstance(stored, bool):
+        stored = float(stored)
+        if isinstance(mean, (int, float)) and not isinstance(mean, bool) \
+                and abs(stored - round(float(mean), 1)) < 0.05:
+            return _mean_to_percentage(mean)
+        return stored
+
+    return _mean_to_percentage(mean)
 
 
 def _get_user_data_service():
@@ -99,7 +151,9 @@ def submit_assessment(user_info):
         'answers': assessment_data['answers'],
         'scores': scores,
         'total_score': total_score,
-        'total_score_percentage': round(total_score, 1),
+        'total_score_percentage': _resolve_total_score_percentage(
+            assessment_data.get('total_score_percentage'), total_score
+        ),
         'category_scores_percentage': category_scores_pct,
         'categories': assessment_data.get('categories', {}),
         'recommendations': _generate_recommendations(scores),
@@ -186,7 +240,7 @@ def get_history(user_info):
         history.append({
             'id': record.get('id', ''),
             'timestamp': record.get('timestamp', ''),
-            'total_score_percentage': record.get('total_score_percentage', record.get('total_score', 0)),
+            'total_score_percentage': _normalize_stored_percentage(record),
             'category_scores_percentage': record.get('category_scores_percentage', {}),
             'recommendations': record.get('recommendations', []),
             'completed': record.get('completed', True),
@@ -219,7 +273,11 @@ def get_latest(user_info):
     if not data:
         return jsonify({"assessment": None}), 200
 
-    return jsonify({"assessment": data}), 200
+    # 与 /history 同口径；拷贝后再换算，避免改动底层存储中的记录
+    normalized = dict(data)
+    normalized['total_score_percentage'] = _normalize_stored_percentage(data)
+
+    return jsonify({"assessment": normalized}), 200
 
 
 def _generate_recommendations(scores):
