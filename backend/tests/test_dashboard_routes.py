@@ -91,6 +91,8 @@ class TestDashboardAuth:
                               headers={'Authorization': 'Bearer fake-token'})
         assert resp.status_code == 401
         assert '认证失败' in resp.get_json()['error']
+        # 确认 token 确实传给了 verify 函数，而非在更早就被拦截
+        mock_verify.assert_called_once_with('fake-token')
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +221,9 @@ class TestGetGoals:
         assert body['status'] == 'success'
         assert body['data']['count'] == 2
         assert len(body['data']['goals']) == 2
-        # 未传 status → 不应带状态过滤
-        _, kwargs = app.test_profile.get_user_goals.call_args
-        assert kwargs.get('status') is None or app.test_profile.get_user_goals.call_args[0][1] is None
+        # 未传 status → 第二个位置参数应为 None
+        called_args = app.test_profile.get_user_goals.call_args
+        assert called_args[0][1] is None
 
     def test_get_goals_with_status_filter(self, client, app):
         app.test_profile.get_user_goals.return_value = (
@@ -255,6 +257,14 @@ class TestCreateGoal:
         assert resp.get_json()['status'] == 'error'
         app.test_profile.update_user_goal.assert_not_called()
 
+    def test_invalid_json_returns_400(self, client, app):
+        """非法 JSON body（如 `{`）→ 400 而非 500（修复前 get_json() 抛 BadRequest）。"""
+        resp = client.post('/api/dashboard/goals',
+                           data='{', content_type='application/json')
+        assert resp.status_code == 400
+        assert resp.get_json()['status'] == 'error'
+        app.test_profile.update_user_goal.assert_not_called()
+
     def test_missing_required_fields_returns_400(self, client, app):
         """缺少必需字段（title/target_amount/deadline）→ 400。"""
         app.test_profile.update_user_goal.return_value = (
@@ -277,7 +287,10 @@ class TestCreateGoal:
         body = resp.get_json()
         assert body['status'] == 'success'
         assert body['message'] == '目标创建成功'
-        app.test_profile.update_user_goal.assert_called_once()
+        # 断言 user_id 和 payload 完整透传到服务层
+        called_args = app.test_profile.update_user_goal.call_args
+        assert called_args[0][0] == 'test_user_id'  # DEV_MODE 注入的 uid
+        assert called_args[0][1] == payload
 
 
 # ---------------------------------------------------------------------------
