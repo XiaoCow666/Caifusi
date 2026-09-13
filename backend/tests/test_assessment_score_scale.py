@@ -928,31 +928,60 @@ class TestFrontendRoundingParity:
     同一份作答在提交时和回看时会显示成两个数。
     """
 
-    @pytest.mark.parametrize('score, expected', [(1, 3), (2, 5), (3, 8), (4, 10)])
-    def test_single_question_submission_and_recovery_agree(self, client, app, score, expected):
-        """单题作答：前端提交值 == 旧记录恢复值（history 与 latest 同口径）。"""
-        # 前端在提交时算出并上报的值
-        assert frontend_payload({'savings': score})['total_score_percentage'] == expected
+    @staticmethod
+    def legacy_record_for(answered_scores, record_id='assessments_round'):
+        """按修复前写入侧的行为构造旧记录。
 
-        # 修复前落库的旧记录形态：无标识，百分比列写的是 1~4 平均分
-        legacy = {
-            'id': 'assessments_single',
+        旧写入侧落库的是 `round(total_score, 1)`（`total_score` 为已答题目的平均分），
+        且不带口径标识，因此这条记录会走「旧记录」还原路径。
+        """
+        answers = {
+            str(i): {'optionId': 'a', 'score': score, 'category': category}
+            for i, (category, score) in enumerate(answered_scores.items(), start=1)
+        }
+        mean = sum(answered_scores.values()) / len(answered_scores)
+        return {
+            'id': record_id,
             'timestamp': '2026-09-12T21:00:00',
-            'answers': {'1': {'optionId': 'a', 'score': score, 'category': 'savings'}},
-            'scores': {'savings': score},
-            'total_score': float(score),
-            'total_score_percentage': float(score),
-            'category_scores_percentage': {'savings': score * 25},
+            'answers': answers,
+            'scores': dict(answered_scores),
+            'total_score': mean,
+            'total_score_percentage': round(mean, 1),   # 修复前的错写形态
+            'category_scores_percentage': {
+                cat: score * 25 for cat, score in answered_scores.items()},
             'recommendations': [],
             'completed': True,
         }
+
+    def assert_history_and_latest(self, client, app, legacy, expected):
         app.test_uds.get_user_data.return_value = ([legacy], None)
         app.test_uds.get_latest_data.return_value = (legacy, None)
-
         history = client.get('/api/assessment/history').get_json()
         latest = client.get('/api/assessment/latest').get_json()
         assert history['history'][0]['total_score_percentage'] == float(expected)
         assert latest['assessment']['total_score_percentage'] == float(expected)
+
+    @pytest.mark.parametrize('score, expected', [(1, 3), (2, 5), (3, 8), (4, 10)])
+    def test_single_question_submission_and_recovery_agree(self, client, app, score, expected):
+        """单题作答：前端提交值 == 旧记录恢复值（history 与 latest 同口径）。"""
+        assert frontend_payload({'savings': score})['total_score_percentage'] == expected
+        self.assert_history_and_latest(
+            client, app, self.legacy_record_for({'savings': score}), expected)
+
+    @pytest.mark.parametrize('answered, expected', [
+        ({'savings': 3, 'risk': 3, 'debt': 3}, 23),   # 总分 9 → 22.5，前端报 23
+        ({'savings': 4, 'risk': 4, 'debt': 1}, 23),   # 同样是总分 9 的另一种分布
+        ({'savings': 2, 'risk': 2}, 10),              # 总分 4 → 10.0，非 .5 对照
+    ])
+    def test_multi_question_totals_round_like_frontend(self, client, app, answered, expected):
+        """多题合计落在 .5 上时同样向上取整（复审点名的「总分 9 分 → 23」）。
+
+        9 / 40 × 100 = 22.5：前端 Math.round 得 23，Python round(22.5) 得 22，
+        旧实现保留一位小数得 22.5 —— 同一份作答会呈现三种结果，取整必须与前端同向。
+        """
+        assert frontend_payload(answered)['total_score_percentage'] == expected
+        self.assert_history_and_latest(
+            client, app, self.legacy_record_for(answered), expected)
 
     @pytest.mark.parametrize('score, raw, expected', [(1, 2.5, 3), (3, 7.5, 8)])
     def test_half_point_values_round_up_like_javascript(self, client, app, score, raw, expected):

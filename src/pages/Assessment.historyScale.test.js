@@ -53,6 +53,15 @@ const makeRecord = (percentage, timestamp) => ({
 const totalScore = (text) =>
   screen.queryByText(text, { selector: '.history-card .fw-bold.fs-5' });
 
+/**
+ * 进度条数值。只断言卡片文本与配色会漏掉「文本对、进度条宽度错」的情况
+ * （Assessment.js:632 `<ProgressBar now={pct}>`），这里把渲染出来的数值一并锁住。
+ * React-Bootstrap 把 now 同时写到 aria-valuenow 与 style.width。
+ */
+const progressBar = () => screen.getByRole('progressbar');
+const progressNow = () => Number(progressBar().getAttribute('aria-valuenow'));
+const progressWidth = () => progressBar().style.width;
+
 const renderHistory = async (record) => {
   getAssessmentHistory.mockResolvedValue({ history: [record], total: 1 });
   render(
@@ -76,9 +85,12 @@ describe('Assessment 历史页总分百分比渲染', () => {
     await waitFor(() => expect(totalScore('100%')).not.toBeNull());
 
     // Assessment.js:171 getCategoryVariant(100) === 'success'
-    const bar = screen.getByRole('progressbar');
+    const bar = progressBar();
     expect(bar.className).toContain('bg-success');
     expect(bar.className).not.toContain('bg-danger');
+    // 进度条数值与宽度同样取 100，而不是只有文本与颜色对
+    expect(progressNow()).toBe(100);
+    expect(progressWidth()).toBe('100%');
   });
 
   it('跳题后的合法小百分比（10.0）原样渲染，不被误当作已修复值', async () => {
@@ -86,6 +98,9 @@ describe('Assessment 历史页总分百分比渲染', () => {
 
     await waitFor(() => expect(totalScore('10%')).not.toBeNull());
     expect(totalScore('100%')).toBeNull();
+    // 跳题的关键差异就在这里：进度条必须是 10% 而不是被重算出的 100%
+    expect(progressNow()).toBe(10);
+    expect(progressWidth()).toBe('10%');
   });
 
   it('症状固证：修复前落库的 4.0 会被渲染成 4%（满分显示为红色的 danger 档）', async () => {
@@ -94,7 +109,9 @@ describe('Assessment 历史页总分百分比渲染', () => {
 
     await waitFor(() => expect(totalScore('4%')).not.toBeNull());
     // Assessment.js:171 getCategoryVariant(4) === 'danger'
-    expect(screen.getByRole('progressbar').className).toContain('bg-danger');
+    expect(progressBar().className).toContain('bg-danger');
+    expect(progressNow()).toBe(4);
+    expect(progressWidth()).toBe('4%');
   });
 
   it('无历史记录时仍渲染空态（兼容路径）', async () => {
