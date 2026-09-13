@@ -63,11 +63,15 @@ class UserDataService:
                 ensure_mysql_user_exists(user_id)
 
                 if data_type == 'assessments':
+                    # total_score_percentage_scale（得分率口径标识）必须一并落库：
+                    # 读取侧靠它区分「0~100 得分率的新记录」与「1~4 平均分错写的旧记录」，
+                    # 漏写会让 MySQL 往返后的新记录退化成旧记录、被二次换算。
                     sql = """
-                        INSERT INTO assessments 
-                        (user_id, answers, scores, total_score, total_score_percentage, 
-                         category_scores_percentage, categories, recommendations, completed, timestamp)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        INSERT INTO assessments
+                        (user_id, answers, scores, total_score, total_score_percentage,
+                         total_score_percentage_scale, category_scores_percentage,
+                         categories, recommendations, completed, timestamp)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     """
                     params = (
                         user_id,
@@ -75,6 +79,7 @@ class UserDataService:
                         to_json_string(data.get('scores')),
                         data.get('total_score', 0.0),
                         data.get('total_score_percentage', 0.0),
+                        data.get('total_score_percentage_scale'),
                         to_json_string(data.get('category_scores_percentage')),
                         to_json_string(data.get('categories')),
                         to_json_string(data.get('recommendations')),
@@ -186,6 +191,10 @@ class UserDataService:
                             'scores': from_json_field(row['scores']),
                             'total_score': row['total_score'],
                             'total_score_percentage': row['total_score_percentage'],
+                            # 用 .get 而非 []：老库若尚未执行 schema.sql 的补列迁移，
+                            # 该列不存在，取成 None 即可回退到「旧记录」口径，
+                            # 不该因为少一列就让整个读接口 500。
+                            'total_score_percentage_scale': row.get('total_score_percentage_scale'),
                             'category_scores_percentage': from_json_field(row['category_scores_percentage']),
                             'categories': from_json_field(row['categories']),
                             'recommendations': from_json_field(row['recommendations']),
