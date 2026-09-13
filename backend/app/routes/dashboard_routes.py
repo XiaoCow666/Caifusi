@@ -16,7 +16,9 @@ def authenticate(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         # 检查是否处于开发模式
-        if current_app.config.get('DEV_MODE'):
+        import os
+        is_dev = os.environ.get('DEV_MODE') == 'true' or current_app.config.get('DEV_MODE')
+        if is_dev:
             kwargs['user_info'] = {'uid': 'test_user_id', 'email': 'test@example.com'}
             return f(*args, **kwargs)
         
