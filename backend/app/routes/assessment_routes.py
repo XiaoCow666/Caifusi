@@ -6,6 +6,56 @@ logger = logging.getLogger('assessment_routes')
 assessment_bp = Blueprint('assessment_bp', __name__)
 
 
+def _is_percentage(value):
+    """Return whether a client value is a finite 0--100 percentage."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return 0 <= value <= 100
+
+
+def _four_point_score_as_percentage(score):
+    """Convert the assessment's established 1--4 average into a percentage."""
+    return round(score * 25, 1)
+
+
+def _normalized_percentage(record):
+    """Return the display percentage while preserving the stored score scale.
+
+    Earlier versions wrote the four-point average into both ``total_score`` and
+    ``total_score_percentage``.  A real assessment cannot produce 1--4% (the
+    frontend's lowest selectable answer is 1/4), so equal values in that range
+    identify the legacy shape without changing correctly stored percentages.
+    """
+    percentage = record.get('total_score_percentage')
+    average_score = record.get('total_score')
+
+    if (
+        isinstance(percentage, (int, float)) and not isinstance(percentage, bool)
+        and isinstance(average_score, (int, float)) and not isinstance(average_score, bool)
+        and 1 <= percentage <= 4
+        and percentage == average_score
+    ):
+        return _four_point_score_as_percentage(average_score)
+
+    if percentage is not None:
+        return percentage
+
+    # Compatibility with records created before the percentage field existed.
+    if isinstance(average_score, (int, float)) and not isinstance(average_score, bool):
+        if 0 <= average_score <= 4:
+            return _four_point_score_as_percentage(average_score)
+        return average_score
+
+    return 0
+
+
+def _assessment_for_response(record):
+    """Normalize response-only fields without mutating persisted history."""
+    normalized = dict(record)
+    normalized['total_score_percentage'] = _normalized_percentage(record)
+    return normalized
+
+
 def _get_user_data_service():
     """Lazy-load user_data_service to avoid Python 3.14 metaclass issue at import time."""
     from app.services.user_data_service import user_data_service
@@ -92,6 +142,18 @@ def submit_assessment(user_info):
 
     total_score = sum(scores.values()) / len(scores) if scores else 0
 
+    # Assessment.js calculates this value on a 0--100 chart scale.  The
+    # previous implementation overwrote it with ``total_score`` (a 1--4
+    # average), so a 100% completion appeared as 4% in history.  Clients that
+    # predate this field retain a deterministic conversion from the established
+    # four-point score scale.
+    submitted_percentage = assessment_data.get('total_score_percentage')
+    total_score_percentage = (
+        round(submitted_percentage, 1)
+        if _is_percentage(submitted_percentage)
+        else _four_point_score_as_percentage(total_score)
+    )
+
     # Build complete assessment with percentage scores for history display
     category_scores_pct = assessment_data.get('categoryScores', {})
 
@@ -99,7 +161,7 @@ def submit_assessment(user_info):
         'answers': assessment_data['answers'],
         'scores': scores,
         'total_score': total_score,
-        'total_score_percentage': round(total_score, 1),
+        'total_score_percentage': total_score_percentage,
         'category_scores_percentage': category_scores_pct,
         'categories': assessment_data.get('categories', {}),
         'recommendations': _generate_recommendations(scores),
@@ -186,7 +248,7 @@ def get_history(user_info):
         history.append({
             'id': record.get('id', ''),
             'timestamp': record.get('timestamp', ''),
-            'total_score_percentage': record.get('total_score_percentage', record.get('total_score', 0)),
+            'total_score_percentage': _normalized_percentage(record),
             'category_scores_percentage': record.get('category_scores_percentage', {}),
             'recommendations': record.get('recommendations', []),
             'completed': record.get('completed', True),
@@ -219,7 +281,7 @@ def get_latest(user_info):
     if not data:
         return jsonify({"assessment": None}), 200
 
-    return jsonify({"assessment": data}), 200
+    return jsonify({"assessment": _assessment_for_response(data)}), 200
 
 
 def _generate_recommendations(scores):
