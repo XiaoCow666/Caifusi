@@ -54,8 +54,10 @@ assessment 得分率口径（total_score_percentage）跨模块回归测试
 运行：cd backend && python -m pytest tests/test_assessment_score_scale.py -v
 前置：DEV_MODE 由 fixture 注入 app.config，user_data_service 被 mock，无需真实 Firebase/MySQL。
 """
+import math
 import os
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -74,6 +76,15 @@ FRONTEND_CATEGORIES = [
     'income', 'goals', 'tracking', 'insurance', 'pressure',
 ]
 MAX_OPTION_SCORE = 4
+
+
+def js_math_round(value):
+    """复刻 JS 的 Math.round()：四舍五入、.5 向 +∞ 取整。
+
+    不能直接用 Python 内置 round —— 它是银行家舍入，round(2.5) == 2、round(7.5) == 8，
+    而 JS 的 Math.round 两者分别是 3 和 8。得分率非负，故 floor(x + 0.5) 与之一致。
+    """
+    return math.floor(value + 0.5)
 
 
 def frontend_payload(answered_scores, include_percentage=True):
@@ -97,8 +108,9 @@ def frontend_payload(answered_scores, include_percentage=True):
         'categoryScores': category_scores,
     }
     if include_percentage:
-        # Assessment.js:431 —— 分母固定为全部题数（跳过未答题目按 0 分计）
-        payload['total_score_percentage'] = round(
+        # Assessment.js:431 —— 分母固定为全部题数（跳过未答题目按 0 分计），
+        # 取整为 JS 的 Math.round 而非 Python 的 round
+        payload['total_score_percentage'] = js_math_round(
             sum(answered_scores.values()) / (len(FRONTEND_CATEGORIES) * MAX_OPTION_SCORE) * 100
         )
     return payload
@@ -664,3 +676,312 @@ class TestEndToEndWithRealMemoryStore:
                   for r in dev_db['users'][self.USER_ID]['assessments']}
         assert stored['legacy_full'] == 4.0
         assert stored['new_full'] == 87.5
+
+
+class TestMysqlStorageBoundary:
+    """存储边界回归：MySQL 的列白名单必须保住口径标识。
+
+    写入侧给记录加了 total_score_percentage_scale，但 user_data_service 的 MySQL 分支
+    是按**列白名单**写与读的：INSERT 列清单里没有它、SELECT 映射里也没有它，
+    于是内存路径回读是 4，MySQL 往返后标识消失、记录被当成旧记录重算成 10 ——
+    提交结果与历史页结果不一致。
+
+    本类覆盖到哪一层（如实说明）：
+      · 覆盖：user_data_service 里**真实的** INSERT 列清单与参数顺序，以及
+        SELECT 行 → dict 的映射代码；再由 assessment_routes 的读取侧消费该 dict。
+      · 方法：把 MySQLHelper.execute_update / execute_query 换成内存假实现，
+        **不连真实数据库**（本机无 pymysql、无 MySQL 实例）。
+      · 不覆盖：pymysql 驱动与连接行为、列类型转换、schema.sql 在真实 MySQL 上的执行。
+        这些属于「未实测」，见 PR 说明。
+    """
+
+    @pytest.fixture
+    def mysql_env(self, monkeypatch):
+        """把 user_data_service 切到 MySQL 分支，并把 MySQLHelper 换成内存假实现。"""
+        from app.services import user_data_service as uds
+
+        state = {'insert_sql': None, 'insert_params': None, 'rows': [], 'next_id': 1}
+
+        def fake_execute_update(sql, params=None):
+            state['insert_sql'] = sql
+            state['insert_params'] = params
+            rid = state['next_id']
+            state['next_id'] += 1
+            return rid
+
+        def fake_execute_query(sql, params=None):
+            if sql.strip().upper().startswith('SELECT'):
+                return list(state['rows'])
+            return []
+
+        monkeypatch.setattr(uds, 'is_mysql_mode', lambda: True)
+        monkeypatch.setattr(uds, 'ensure_mysql_user_exists', lambda *a, **k: None)
+        monkeypatch.setattr(uds.MySQLHelper, 'execute_update',
+                            staticmethod(fake_execute_update))
+        monkeypatch.setattr(uds.MySQLHelper, 'execute_query',
+                            staticmethod(fake_execute_query))
+        return state
+
+    @pytest.fixture
+    def mysql_client(self, mysql_env):
+        """真实 user_data_service + 假 MySQLHelper 的客户端（**不 mock 服务层**）。"""
+        flask_app = Flask(__name__)
+        flask_app.register_blueprint(assessment_routes.assessment_bp,
+                                     url_prefix='/api/assessment')
+        flask_app.config['DEV_MODE'] = True
+        flask_app.config['TESTING'] = True
+        return flask_app.test_client()
+
+    @staticmethod
+    def insert_columns(state):
+        """从 INSERT 语句里解析出列名列表（不写死顺序，漏列时如实反映）。"""
+        sql = state['insert_sql']
+        return [c.strip().strip('`')
+                for c in sql[sql.index('(') + 1: sql.index(')')].split(',')]
+
+    @classmethod
+    def row_from_insert(cls, state, row_id=1):
+        """把 INSERT 实际写入的列与参数还原成 pymysql DictCursor 形态的一行。
+
+        列名从 INSERT 语句里解析，测试不写死列顺序。先按位置 zip、再补时间戳，
+        因此**漏列时这里不会报错**，而是让缺列原样传导到读取侧 —— 好让端到端用例
+        在语义上失败（回读值不对），而不是只倒在一个结构断言上。
+        列数与参数个数的对应关系由 test_insert_column_list_matches_params 单独把关。
+        """
+        row = dict(zip(cls.insert_columns(state), state['insert_params']))
+        row['id'] = row_id
+        row['timestamp'] = datetime(2026, 9, 13, 21, 0, 0)
+        return row
+
+    def test_insert_column_list_matches_params(self, mysql_env):
+        """列清单与占位符/参数个数必须一一对应（timestamp 由 NOW() 提供，不占参数位）。"""
+        from app.services.user_data_service import user_data_service
+
+        user_data_service.save_user_data('u1', 'assessments', {
+            'answers': {}, 'scores': {}, 'total_score': 4.0,
+            'total_score_percentage': 4.0,
+            'total_score_percentage_scale': 'percent_0_100',
+        })
+        sql = mysql_env['insert_sql']
+        columns = self.insert_columns(mysql_env)
+        assert columns[-1] == 'timestamp', '时间戳应由 NOW() 提供，不占参数位'
+        assert len(columns) - 1 == len(mysql_env['insert_params'])
+        assert len(columns) - 1 == sql.count('%s')
+
+    @staticmethod
+    def legacy_mysql_row(with_scale_column=True):
+        """修复前落库的 MySQL 行：只答一道 4 分题，百分比列写的是平均分 4.0。
+
+        with_scale_column=False 模拟「老库还没跑补列迁移」——SELECT 结果里
+        根本没有这一列（不是 NULL，是键不存在）。
+        """
+        row = {
+            'id': 7,
+            'answers': {'10': {'optionId': 'd', 'score': 4, 'category': 'pressure'}},
+            'scores': {'pressure': 4},
+            'total_score': 4.0,
+            'total_score_percentage': 4.0,
+            'category_scores_percentage': {'pressure': 100},
+            'categories': {},
+            'recommendations': [],
+            'completed': 1,
+            'timestamp': datetime(2026, 9, 1, 10, 0, 0),
+        }
+        if with_scale_column:
+            row['total_score_percentage_scale'] = None
+        return row
+
+    # ── SQL 映射本身 ──────────────────────────────────────────────
+
+    def test_insert_columns_include_scale_field(self, mysql_env):
+        """INSERT 的列清单必须带上口径标识列，否则 MySQL 路径必然丢标识。"""
+        from app.services.user_data_service import user_data_service
+
+        ok, _ = user_data_service.save_user_data('u1', 'assessments', {
+            'answers': {}, 'scores': {}, 'total_score': 4.0,
+            'total_score_percentage': 4.0,
+            'total_score_percentage_scale': 'percent_0_100',
+        })
+        assert ok
+        assert 'total_score_percentage_scale' in self.insert_columns(mysql_env)
+        assert self.row_from_insert(mysql_env).get('total_score_percentage_scale') \
+            == 'percent_0_100'
+
+    def test_select_mapping_exposes_scale_field(self, mysql_env):
+        """SELECT 行 → dict 的映射必须带出该列，缺失时读成 None 而不是 KeyError。"""
+        from app.services.user_data_service import user_data_service
+
+        mysql_env['rows'] = [self.legacy_mysql_row(with_scale_column=True)]
+        data_list, error = user_data_service.get_user_data('u1', 'assessments', limit=10)
+        assert error is None
+        assert data_list[0]['total_score_percentage_scale'] is None
+
+        mysql_env['rows'] = [self.legacy_mysql_row(with_scale_column=False)]
+        data_list, error = user_data_service.get_user_data('u1', 'assessments', limit=10)
+        assert error is None
+        assert data_list[0]['total_score_percentage_scale'] is None
+
+    # ── 端到端：提交 → MySQL 映射 → 回读 ──────────────────────────
+
+    def test_submit_value_equal_to_mean_survives_mysql_round_trip(self, mysql_client, mysql_env):
+        """提交百分比 4、平均分 4 的新记录，经 MySQL 映射往返后仍是 4。
+
+        修复前这里会变成 10：标识没落库，读取侧把该行当成旧记录、
+        按 answers 用固定分母还原。
+        """
+        payload = frontend_payload({'pressure': 4})
+        payload['total_score_percentage'] = 4     # 合法区间内的手工提交值
+
+        resp = mysql_client.post('/api/assessment/submit', json={'assessment': payload})
+        assert resp.status_code == 200
+
+        # 回读：先把 INSERT 真正写下的行交给 SELECT 映射，再走 history / latest 出口。
+        # 这里刻意不先断言标识列 —— 漏列时要让它在**回读值**上炸出来（4 变成 10），
+        # 而不是提前倒在一个结构断言上。
+        mysql_env['rows'] = [self.row_from_insert(mysql_env)]
+        history = mysql_client.get('/api/assessment/history').get_json()
+        latest = mysql_client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 4.0
+        assert latest['assessment']['total_score_percentage'] == 4.0
+
+    def test_legacy_mysql_row_still_recovers_to_ten(self, mysql_client, mysql_env):
+        """无标识的旧单题记录（只答一道 4 分题）经 MySQL 映射后仍恢复为 10。"""
+        mysql_env['rows'] = [self.legacy_mysql_row(with_scale_column=True)]
+
+        history = mysql_client.get('/api/assessment/history').get_json()
+        latest = mysql_client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 10.0
+        assert latest['assessment']['total_score_percentage'] == 10.0
+
+    def test_unmigrated_mysql_row_degrades_without_error(self, mysql_client, mysql_env):
+        """老库未补列（键根本不存在）时读取不该 500，退化成按旧记录还原。"""
+        mysql_env['rows'] = [self.legacy_mysql_row(with_scale_column=False)]
+
+        assert mysql_client.get('/api/assessment/history').status_code == 200
+        history = mysql_client.get('/api/assessment/history').get_json()
+        assert history['history'][0]['total_score_percentage'] == 10.0
+
+
+class TestSchemaDeclaresScaleColumn:
+    """schema.sql 必须声明该列并给已有库留下幂等补列迁移。
+
+    本机无 MySQL，这里只做静态核对：列已声明、迁移存在且可空、并且能被
+    db_mysql.init_database 的朴素「行尾分号」切分器切成完整语句。
+    """
+
+    @staticmethod
+    def schema_text():
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'schema.sql')
+        with open(path, encoding='utf-8') as f:
+            return f.read()
+
+    def test_assessments_table_declares_nullable_scale_column(self):
+        text = self.schema_text()
+        start = text.index('CREATE TABLE IF NOT EXISTS `assessments`')
+        table = text[start:text.index('ENGINE=InnoDB', start)]
+        assert '`total_score_percentage_scale`' in table
+        line = [l for l in table.split('\n') if '`total_score_percentage_scale`' in l][0]
+        # 必须可空：历史行补列后为 NULL，读取侧据此按旧记录还原
+        assert 'DEFAULT NULL' in line
+
+    def test_migration_for_existing_databases(self):
+        text = self.schema_text()
+        assert 'information_schema.COLUMNS' in text
+        assert 'ADD COLUMN `total_score_percentage_scale`' in text
+
+    def test_migration_survives_init_database_splitter(self):
+        """复刻 db_mysql.init_database 的切分逻辑，确认迁移被切成完整语句。
+
+        该实现按「行尾是分号」切分并跳过 -- 注释行；迁移里若把 ALTER 写成半截，
+        真实初始化时会执行到不完整的 SQL。
+        """
+        statements, current = [], []
+        for line in self.schema_text().split('\n'):
+            if line.strip().startswith('--') or line.strip().startswith('#') \
+                    or not line.strip():
+                continue
+            current.append(line)
+            if line.strip().endswith(';'):
+                statements.append('\n'.join(current))
+                current = []
+
+        alter = [s for s in statements if 'ADD COLUMN `total_score_percentage_scale`' in s]
+        assert len(alter) == 1, '补列迁移应恰好是一条可执行语句'
+        stmt = alter[0]
+        assert stmt.strip().startswith('SET @scale_ddl')
+        assert stmt.rstrip().endswith(';')
+
+        # 幂等前提：另一条语句先查 information_schema，列已存在时 ALTER 被换成空操作
+        guard = [s for s in statements if 'information_schema.COLUMNS' in s]
+        assert len(guard) == 1, '补列前必须有且仅有一条列存在性检查'
+        assert guard[0].strip().startswith('SET @scale_col_exists')
+        assert '@scale_col_exists = 0' in ''.join(alter), 'ALTER 必须由列存在性检查把守'
+
+
+class TestFrontendRoundingParity:
+    """历史恢复值与前端提交值必须逐一对齐（重点是 .5 的取整方向）。
+
+    前端 Assessment.js:431 用 Math.round（.5 向 +∞），Python 内置 round 是银行家舍入：
+    单题得 1 分 → 2.5%，前端提交 3%；单题得 3 分 → 7.5%，前端提交 8%。
+    历史恢复若沿用 Python 的 round(..., 1)，恢复值 2.5 / 7.5 与当初提交值对不上，
+    同一份作答在提交时和回看时会显示成两个数。
+    """
+
+    @pytest.mark.parametrize('score, expected', [(1, 3), (2, 5), (3, 8), (4, 10)])
+    def test_single_question_submission_and_recovery_agree(self, client, app, score, expected):
+        """单题作答：前端提交值 == 旧记录恢复值（history 与 latest 同口径）。"""
+        # 前端在提交时算出并上报的值
+        assert frontend_payload({'savings': score})['total_score_percentage'] == expected
+
+        # 修复前落库的旧记录形态：无标识，百分比列写的是 1~4 平均分
+        legacy = {
+            'id': 'assessments_single',
+            'timestamp': '2026-09-12T21:00:00',
+            'answers': {'1': {'optionId': 'a', 'score': score, 'category': 'savings'}},
+            'scores': {'savings': score},
+            'total_score': float(score),
+            'total_score_percentage': float(score),
+            'category_scores_percentage': {'savings': score * 25},
+            'recommendations': [],
+            'completed': True,
+        }
+        app.test_uds.get_user_data.return_value = ([legacy], None)
+        app.test_uds.get_latest_data.return_value = (legacy, None)
+
+        history = client.get('/api/assessment/history').get_json()
+        latest = client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == float(expected)
+        assert latest['assessment']['total_score_percentage'] == float(expected)
+
+    @pytest.mark.parametrize('score, raw, expected', [(1, 2.5, 3), (3, 7.5, 8)])
+    def test_half_point_values_round_up_like_javascript(self, client, app, score, raw, expected):
+        """2.5 / 7.5 这类 .5 值必须向 +∞ 取整，不能沿用 Python 的银行家舍入。
+
+        直接对被测函数下断言，让失败信息指向取整方向本身：
+        Python round(2.5) == 2、round(7.5) == 8 —— 前者正是与 JS 分道扬镳的地方。
+        """
+        answers = {'1': {'optionId': 'a', 'score': score, 'category': 'savings'}}
+        assert score / (len(FRONTEND_CATEGORIES) * MAX_OPTION_SCORE) * 100 == raw
+
+        recovered = assessment_routes._answers_to_percentage(answers)
+        assert recovered == float(expected)
+        # 交叉印证：JS 的 Math.round 与 Python 的 round 在 2.5 上结果不同
+        assert js_math_round(raw) == expected
+        if raw == 2.5:
+            assert round(raw) != expected
+
+    def test_new_record_read_back_equals_submitted_value(self, client, app):
+        """带标识的新记录：提交值与回读值一致，不受取整差异影响。"""
+        payload = frontend_payload({'savings': 1})
+        assert payload['total_score_percentage'] == 3
+
+        client.post('/api/assessment/submit', json={'assessment': payload})
+        record = submitted_record(app)
+        app.test_uds.get_user_data.return_value = ([record], None)
+        app.test_uds.get_latest_data.return_value = (record, None)
+
+        history = client.get('/api/assessment/history').get_json()
+        latest = client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 3.0
+        assert latest['assessment']['total_score_percentage'] == 3.0

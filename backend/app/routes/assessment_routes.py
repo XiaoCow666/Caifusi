@@ -40,6 +40,15 @@ def _is_valid_percentage(value):
     return _is_number(value) and 0.0 <= float(value) <= 100.0
 
 
+def _frontend_round(value):
+    """复刻前端 Math.round()：四舍五入、.5 向 +∞ 取整。
+
+    Python 内置 round() 是银行家舍入（round(2.5) == 2），JS 的 Math.round 则进一位，
+    两者在 .5 上结果不同。得分率恒非负，故 floor(x + 0.5) 与 Math.round 完全等价。
+    """
+    return math.floor(value + 0.5)
+
+
 def _mean_to_percentage(total_score):
     """把 1~4 分制的平均分换算成 0~100 得分率；无法换算时返回 0.0。"""
     if not _is_number(total_score):
@@ -52,9 +61,13 @@ def _answers_to_percentage(answers):
 
     旧记录的 answers 与 total_score 同源（同一次提交的同一批作答），只要 answers
     完整，就能确定性还原前端当时算出的得分率：
-    sum(各题得分) / (总题数 × 单题满分) × 100。
+    Math.round(sum(各题得分) / (总题数 × 单题满分) × 100)。
     跳题场景的关键差异正在于此——只答一道 4 分题时，前端口径是 4/40 = 10%，
     而「按已答题目求平均再换算」会得到 100%。
+
+    取整必须与前端一致：单题得 1 分时是 2.5%，前端 Math.round 提交 3%，这里若沿用
+    Python 的 round() 会得到 2.5，历史恢复值就与当初提交值对不上；单题得 3 分同理
+    （7.5% vs 8%）。故用 _frontend_round 而非内置 round。
     """
     if not isinstance(answers, dict) or not answers:
         return None
@@ -67,7 +80,7 @@ def _answers_to_percentage(answers):
 
     percentage = total / (TOTAL_QUESTION_COUNT * MAX_OPTION_SCORE) * 100
     # 问卷扩容后旧记录的作答数可能多于当前总题数，得分率收敛到上界
-    return round(min(percentage, 100.0), 1)
+    return float(min(_frontend_round(percentage), 100.0))
 
 
 def _recover_legacy_percentage(record):
@@ -125,10 +138,10 @@ def _normalize_stored_percentage(record):
     兼容性边界（不声称确定性恢复）：
       · 带标识的新记录、以及 answers 可用的旧记录 → 确定性。
       · answers 缺失的旧记录 → 只能按平均分换算，是上界近似（见 _recover_legacy_percentage）。
-      · MySQL 分支按列白名单写入与回读（user_data_service.save_user_data /
-        get_user_data），标识字段不在 schema.sql 的列里，不会落库；经 MySQL 往返的
-        新记录会退化成第 3 条、按 answers 还原（前端公式一致时结果相同）。
-        本次不擅自变更数据库结构，该局限随 PR 说明一并交付。
+      · 标识随记录一起持久化，三条存储路径都覆盖：内存与 Firestore 整体存取记录；
+        MySQL 由 schema.sql 的 total_score_percentage_scale 列承载（含给已有库的幂等
+        补列迁移），INSERT 与 SELECT 都带上该列，因此 MySQL 往返后仍是新记录。
+        仅当老库未执行迁移、SELECT 读不到该列时才会退化为 None，等同旧记录处理。
 
     仅作用于响应出口，不修改底层存储，因此可随代码回滚。
     """
