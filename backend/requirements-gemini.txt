@@ -1,0 +1,4 @@
+# 可选依赖 — Google Gemini AI 模型
+# 仅当配置 GEMINI_API_KEY 并使用 Gemini 时安装
+# 安装方式：pip install -r requirements.txt -r requirements-gemini.txt
+google-generativeai>=0.3.1

@@ -1,0 +1,4 @@
+# 可选依赖 — Unix 生产环境 WSGI 服务器
+# 仅在 Linux/macOS 生产部署时安装；Windows 不支持 gunicorn
+# 安装方式：pip install -r requirements.txt -r requirements-prod.txt
+gunicorn>=21.2.0

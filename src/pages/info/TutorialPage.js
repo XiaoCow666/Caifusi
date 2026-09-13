@@ -201,7 +201,7 @@ const TutorialPage = () => {
                     <h3 className="text-xl font-bold text-white mb-2">{tutorial.title}</h3>
                     <p className="text-white/80 text-sm line-clamp-2">{tutorial.description}</p>
                   </div>
-                  <a href="#" className="absolute inset-0" aria-label={`查看 ${tutorial.title} 教程`}></a>
+                  <a href="#/" className="absolute inset-0" aria-label={`查看 ${tutorial.title} 教程`}></a>
                 </div>
               ))}
             </div>
@@ -335,7 +335,7 @@ const TutorialPage = () => {
                   <h3 className="text-lg font-bold text-gray-800 mb-2">{tutorial.title}</h3>
                   <p className="text-gray-600 mb-4 line-clamp-2">{tutorial.description}</p>
                   <a 
-                    href="#" 
+                    href="#/" 
                     className="inline-block text-green-600 font-medium hover:text-green-800 transition-colors"
                   >
                     {tutorial.type === 'video' ? '观看视频' : '阅读教程'} →
@@ -387,7 +387,7 @@ const TutorialPage = () => {
                 </li>
               </ul>
               <a 
-                href="#" 
+                href="#/" 
                 className="inline-block bg-white text-blue-700 font-medium px-6 py-3 rounded-md hover:bg-blue-50 transition-colors"
               >
                 探索课程

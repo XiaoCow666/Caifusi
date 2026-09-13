@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { checkHealth } from './services/api';
+import { resolveRedirectTarget } from './utils/routeRedirect';
 
 // 导入样式
 import './mobile-styles.css'; // 添加移动端样式
@@ -31,7 +31,7 @@ import Layout from './components/Layout';
 
 // API连接状态组件
 const ApiStatusIndicator = () => {
-  const [apiStatus, setApiStatus] = useState('connected'); // 默认假设已连接，用于调试
+  const [apiStatus] = useState('connected'); // 默认假设已连接，用于调试
   
   useEffect(() => {
     // 移除API检查，用于调试
@@ -90,9 +90,14 @@ const RedirectHandler = () => {
   const location = useLocation();
   
   useEffect(() => {
-    // 当访问根路径且没有使用hash路由格式时重定向
-    if (location.pathname === '/' && !location.hash) {
-      window.location.replace('/#/');
+    // 当访问根路径且地址栏没有使用 hash 路由格式时补全重定向。
+    // 判断依据与跳转目标由 resolveRedirectTarget 统一处理（详见该模块注释）：
+    // 读 window.location.hash（HashRouter 解析出的 location.hash 恒为空），
+    // 跳转目标保留当前路径前缀，避免子路径部署时跳出站点。
+    const target = resolveRedirectTarget(location.pathname, window.location);
+
+    if (target) {
+      window.location.replace(target);
     }
   }, [location]);
   
