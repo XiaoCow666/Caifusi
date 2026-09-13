@@ -23,12 +23,20 @@ assessment 得分率口径（total_score_percentage）跨模块回归测试
 
 本测试固化修复后的口径边界：
 
-  1. 写入侧：0~100 得分率必须有 0~100 的值。
+  1. 写入侧：0~100 得分率必须有 0~100 的值，并带口径标识
+     （total_score_percentage_scale = 'percent_0_100'）。
      · 前端已算好并随请求提交时，采信前端口径（跳题时前端分母固定为全部题数，
        与「按已答题求平均」不同，必须以前端为准）。
      · 未提交 / 非法时，按平均分换算成 0~100 回退，绝不写入 1~4 尺度的值。
-  2. 读取侧：修复前已落库的记录（该字段恰等于 round(total_score, 1)）在
-     /history、/latest 出口处换算回 0~100，且不修改底层存储。
+  2. 读取侧：按口径标识识别，而不是按「百分比是否等于平均分」猜。
+     · 带标识 → 新记录，存储值原样返回（保证「提交值 == 回读值」）。
+     · 无标识且与 round(平均分, 1) 不等 → 不可能是旧记录，原样透传。
+     · 无标识且等于 round(平均分, 1) / 该字段缺失 → 旧记录，用 answers 按固定分母
+       还原；answers 也缺失时只能按平均分换算（明确记为近似，非确定性恢复）。
+     换算只发生在 /history、/latest 出口处，不修改底层存储。
+
+历史最小得分率不是 25：跳题让得分率可以低至 2.5（1 题得 1 分 / 40），与 1~4 的
+平均分区间重叠，所以「两值相等」并不能证明是旧记录——这正是需要口径标识的原因。
 
 刻意锁定的既有兼容行为（不得被本次改动破坏）：
 
@@ -94,6 +102,44 @@ def frontend_payload(answered_scores, include_percentage=True):
             sum(answered_scores.values()) / (len(FRONTEND_CATEGORIES) * MAX_OPTION_SCORE) * 100
         )
     return payload
+
+
+def legacy_aggregate_only_record():
+    """修复前落库的形态：total_score_percentage 恰等于 round(total_score, 1)。
+
+    该形态不含 answers（更早的 Firestore 文档可能只留聚合值），因此还原时
+    只能按平均分换算，属明确记录的近似分支。
+    """
+    return {
+        'id': 'assessments_0',
+        'timestamp': '2026-09-12T21:00:00',
+        'total_score': 4.0,
+        'total_score_percentage': 4.0,
+        'category_scores_percentage': {'savings': 100},
+        'recommendations': [],
+        'completed': True,
+    }
+
+
+def legacy_skipped_record():
+    """修复前落库的跳题记录：只作答最后一题（4 分），其余 9 题跳过。
+
+    修复前写入侧恒写 round(total_score, 1)，故落库为 4.0；但按前端口径
+    （分母固定为全部 10 题）真值是 4 / (10 × 4) × 100 = 10%。
+    「百分比等于平均分就按平均分乘 25」会把它换算成 100%，与本 PR 的跳题口径冲突。
+    answers 与 total_score 同源，因此这条记录的 10% 是可以确定性还原的。
+    """
+    return {
+        'id': 'assessments_skip',
+        'timestamp': '2026-09-12T21:00:00',
+        'answers': {'10': {'optionId': 'd', 'score': 4, 'category': 'pressure'}},
+        'scores': {'pressure': 4},
+        'total_score': 4.0,
+        'total_score_percentage': 4.0,
+        'category_scores_percentage': {'pressure': 100},
+        'recommendations': [],
+        'completed': True,
+    }
 
 
 def frontend_variant(percentage):
@@ -232,25 +278,180 @@ class TestSubmitPercentageScale:
             payload['total_score_percentage'])
 
 
+class TestPercentageScaleMarkerRoundTrip:
+    """口径标识：写入侧落库、读取侧采信，保证「提交值 == 回读值」。
+
+    这是本次 P1 修复的核心回归。修复前读取侧靠「百分比是否等于平均分」判断新旧，
+    而跳题让合法得分率可以低到与 1~4 平均分重叠，于是「提交百分比 4、平均分 4」
+    这类已被写入侧接受的记录在回读时被当成旧记录换算成 100——提交与回读不一致，
+    且是纯读取侧引入的错值。区分新旧必须靠记录自带的口径标识，不能靠数值猜。
+    """
+
+    MARKER = assessment_routes.PERCENTAGE_SCALE_FIELD
+    MARKER_VALUE = assessment_routes.PERCENTAGE_SCALE_0_100
+
+    def test_submit_stamps_percentage_scale_marker(self, client, app):
+        """新记录必须带口径标识，且标识随记录一起进存储层（读侧据此跳过换算）。"""
+        payload = frontend_payload({cat: 4 for cat in FRONTEND_CATEGORIES})
+        client.post('/api/assessment/submit', json={'assessment': payload})
+
+        record = submitted_record(app)
+        assert record[self.MARKER] == self.MARKER_VALUE
+        assert record['total_score_percentage'] == 100.0
+
+    def test_accepted_percentage_equal_to_mean_round_trips(self, client, app):
+        """提交百分比 == 平均分（都是 4）时，存储与回读都必须还是 4。
+
+        修复前：写入侧接受 4（0~100 区间内合法），读取侧却按「等于平均分」判为旧记录，
+        换算成 100，导致同一条记录提交值与回读值不一致。
+        """
+        payload = frontend_payload({'pressure': 4})
+        assert payload['scores'] == {'pressure': 4}
+        # 4 不是前端固定分母公式能产生的取值（分母 40 → 2.5 的倍数），
+        # 但它在合法区间内，写入侧接受它就应当原样读回
+        payload['total_score_percentage'] = 4
+
+        resp = client.post('/api/assessment/submit', json={'assessment': payload})
+        assert resp.status_code == 200
+        # 提交响应回显的也是提交值
+        assert resp.get_json()['assessment']['total_score_percentage'] == 4.0
+
+        record = submitted_record(app)
+        assert record['total_score'] == 4.0              # 平均分口径不受影响
+        assert record['total_score_percentage'] == 4.0   # 修复前存的是 4、读出来却是 100
+
+        # 回读：把真正落库的那条记录喂回存储层，走 /history 与 /latest 出口
+        app.test_uds.get_user_data.return_value = ([record], None)
+        app.test_uds.get_latest_data.return_value = (record, None)
+
+        history = client.get('/api/assessment/history').get_json()
+        latest = client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 4.0
+        assert latest['assessment']['total_score_percentage'] == 4.0
+
+    def test_markerless_legacy_lookalike_is_still_recovered(self, client, app):
+        """对照组：数值相同但没有口径标识的记录仍按旧记录还原（4 → 10，不是 100 也不是 4）。
+
+        两条记录的字段值几乎一致，唯一的区别就是口径标识——这正是本次改动的要点：
+        识别新旧的依据是记录自称的口径，不是数值巧合。
+        """
+        app.test_uds.get_user_data.return_value = ([legacy_skipped_record()], None)
+
+        resp = client.get('/api/assessment/history')
+        assert resp.get_json()['history'][0]['total_score_percentage'] == 10.0
+
+    def test_marker_with_illegal_value_falls_back_to_recovery(self, client, app):
+        """标识与实际值自相矛盾时（标识说百分比、值却越界）不硬采信存储值。"""
+        record = legacy_skipped_record()
+        record[self.MARKER] = self.MARKER_VALUE
+        record['total_score_percentage'] = 400.0
+        app.test_uds.get_user_data.return_value = ([record], None)
+
+        resp = client.get('/api/assessment/history')
+        # 越界值被丢弃，按 answers 还原为固定分母得分率
+        assert resp.get_json()['history'][0]['total_score_percentage'] == 10.0
+
+    @pytest.mark.parametrize('marker_value', [None, 'percent_0_1', 'unknown', 100])
+    def test_unknown_marker_value_is_treated_as_legacy(self, client, app, marker_value):
+        """标识缺失或取值非本版本约定时，一律按旧记录还原，不采信存储值。
+
+        answers 齐备，因此还原是确定性的：4 / 40 → 10%。
+        """
+        record = legacy_skipped_record()
+        if marker_value is None:
+            record.pop(self.MARKER, None)     # 旧记录形态：字段根本不存在
+        else:
+            record[self.MARKER] = marker_value
+        app.test_uds.get_user_data.return_value = ([record], None)
+
+        resp = client.get('/api/assessment/history')
+        assert resp.get_json()['history'][0]['total_score_percentage'] == 10.0
+
+
 class TestStoredPercentageReadCompat:
     """读取侧：历史记录在出口处把 1~4 错值换算回 0~100，且不污染存储。"""
 
-    @staticmethod
-    def legacy_record():
-        """修复前落库的形态：total_score_percentage 恰等于 round(total_score, 1)。"""
-        return {
-            'id': 'assessments_0',
+    def test_history_recovers_legacy_skipped_question_denominator(self, client, app):
+        """旧跳题记录：4.0 应按固定分母还原为 10%，而不是按平均分换算出的 100%。"""
+        app.test_uds.get_user_data.return_value = ([legacy_skipped_record()], None)
+
+        resp = client.get('/api/assessment/history')
+        assert resp.status_code == 200
+        percentage = resp.get_json()['history'][0]['total_score_percentage']
+        assert percentage == 10.0
+        # 10% 在前端配色里是 danger；若被误算成 100% 会显示成功态，症状会再次翻转
+        assert frontend_variant(percentage) == 'danger'
+
+    def test_latest_recovers_legacy_skipped_question_denominator(self, client, app):
+        """latest 出口与 history 同口径：旧跳题记录同样还原为 10%。"""
+        app.test_uds.get_latest_data.return_value = (legacy_skipped_record(), None)
+
+        resp = client.get('/api/assessment/latest')
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert set(body.keys()) == {'assessment'}
+        assert body['assessment']['total_score_percentage'] == 10.0
+        assert body['assessment']['total_score'] == 4.0
+
+    def test_history_does_not_mutate_legacy_skipped_record(self, client, app):
+        """兼容路径：旧跳题记录的换算只发生在响应出口，底层记录（含 answers）保持原样。"""
+        record = legacy_skipped_record()
+        answers_snapshot = {'10': dict(record['answers']['10'])}
+        app.test_uds.get_user_data.return_value = ([record], None)
+
+        client.get('/api/assessment/history')
+
+        assert record['total_score_percentage'] == 4.0
+        assert record['total_score'] == 4.0
+        assert record['answers'] == answers_snapshot
+
+    def test_latest_does_not_mutate_legacy_skipped_record(self, client, app):
+        """latest 出口同样是非破坏性的：返回的是拷贝，存储层对象不被改写。"""
+        record = legacy_skipped_record()
+        app.test_uds.get_latest_data.return_value = (record, None)
+
+        client.get('/api/assessment/latest')
+
+        assert record['total_score_percentage'] == 4.0
+        assert record['answers'] == {'10': {'optionId': 'd', 'score': 4, 'category': 'pressure'}}
+
+    def test_legacy_full_answers_agrees_with_mean_scale(self, client, app):
+        """旧记录全部作答时两条还原路径一致（平均分 × 25 == 固定分母结果），锁定回归边界。"""
+        record = {
+            'id': 'assessments_full',
             'timestamp': '2026-09-12T21:00:00',
+            'answers': {
+                str(i): {'optionId': 'd', 'score': 4, 'category': cat}
+                for i, cat in enumerate(FRONTEND_CATEGORIES, start=1)
+            },
             'total_score': 4.0,
             'total_score_percentage': 4.0,
-            'category_scores_percentage': {'savings': 100},
+            'category_scores_percentage': {},
             'recommendations': [],
             'completed': True,
         }
+        app.test_uds.get_user_data.return_value = ([record], None)
+
+        resp = client.get('/api/assessment/history')
+        assert resp.get_json()['history'][0]['total_score_percentage'] == 100.0
+
+    def test_legacy_without_answers_is_a_documented_approximation(self, client, app):
+        """信息不足时的兼容策略：无 answers 的旧记录只能按平均分换算，不是确定性恢复。
+
+        同一份「total_score 4.0 / 百分比 4.0」既可能是全答（真值 100%），
+        也可能是只答一题（真值 10%）。此处固化当前选择（全答为上界近似），
+        并明确它无法区分两种来源——不要把它当成复原出的历史真值。
+        """
+        record = legacy_aggregate_only_record()
+        assert 'answers' not in record
+        app.test_uds.get_user_data.return_value = ([record], None)
+
+        resp = client.get('/api/assessment/history')
+        assert resp.get_json()['history'][0]['total_score_percentage'] == 100.0
 
     def test_history_normalizes_legacy_record(self, client, app):
         """旧记录：4.0 → 100.0（修复前原样透传，历史页显示 4%）。"""
-        app.test_uds.get_user_data.return_value = ([self.legacy_record()], None)
+        app.test_uds.get_user_data.return_value = ([legacy_aggregate_only_record()], None)
 
         resp = client.get('/api/assessment/history')
         assert resp.status_code == 200
@@ -260,7 +461,7 @@ class TestStoredPercentageReadCompat:
 
     def test_history_does_not_mutate_stored_record(self, client, app):
         """兼容路径：换算只发生在响应出口，底层记录保持原样（非破坏性，可回滚）。"""
-        record = self.legacy_record()
+        record = legacy_aggregate_only_record()
         app.test_uds.get_user_data.return_value = ([record], None)
 
         client.get('/api/assessment/history')
@@ -312,7 +513,7 @@ class TestStoredPercentageReadCompat:
 
     def test_latest_normalizes_legacy_record(self, client, app):
         """latest 出口与 history 同口径，且响应包络仍是 {assessment}。"""
-        app.test_uds.get_latest_data.return_value = (self.legacy_record(), None)
+        app.test_uds.get_latest_data.return_value = (legacy_aggregate_only_record(), None)
 
         resp = client.get('/api/assessment/latest')
         assert resp.status_code == 200
@@ -382,6 +583,60 @@ class TestEndToEndWithRealMemoryStore:
 
         latest = client.get('/api/assessment/latest').get_json()
         assert latest['assessment']['total_score_percentage'] == 100.0
+
+    def test_skipped_questions_round_trip_over_real_store(self, e2e):
+        """跳题提交（只答 1 题得 4 分）经真实存储往返后仍是 10%，不会被读成 100%。"""
+        client, _ = e2e
+        payload = frontend_payload({'pressure': 4})
+        assert payload['total_score_percentage'] == 10
+
+        resp = client.post('/api/assessment/submit', json={'assessment': payload})
+        assert resp.status_code == 200
+        assert resp.get_json()['assessment']['total_score_percentage'] == 10.0
+
+        history = client.get('/api/assessment/history').get_json()
+        latest = client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 10.0
+        assert latest['assessment']['total_score_percentage'] == 10.0
+
+    def test_percentage_equal_to_mean_round_trips_over_real_store(self, e2e):
+        """提交百分比 4、平均分 4：口径标识随真实存储往返，回读仍是 4。
+
+        这是 P1 修复的端到端复核——修复前该记录读回会变成 100，
+        因为读取侧把「百分比等于平均分」当成旧记录的特征。
+        """
+        client, dev_db = e2e
+        payload = frontend_payload({'pressure': 4})
+        payload['total_score_percentage'] = 4   # 合法区间内的手工提交值
+
+        resp = client.post('/api/assessment/submit', json={'assessment': payload})
+        assert resp.status_code == 200
+
+        # 存储层确实留下了口径标识（内存模式随记录整体保存）
+        stored = dev_db['users'][self.USER_ID]['assessments'][-1]
+        assert stored[assessment_routes.PERCENTAGE_SCALE_FIELD] == \
+            assessment_routes.PERCENTAGE_SCALE_0_100
+        assert stored['total_score_percentage'] == 4.0
+
+        history = client.get('/api/assessment/history').get_json()
+        latest = client.get('/api/assessment/latest').get_json()
+        assert history['history'][0]['total_score_percentage'] == 4.0
+        assert latest['assessment']['total_score_percentage'] == 4.0
+
+    def test_legacy_skipped_row_normalized_over_real_store(self, e2e):
+        """旧跳题记录经真实读链路还原为 10%，且底层记录（含 answers）保持原样。"""
+        client, dev_db = e2e
+        legacy = legacy_skipped_record()
+        dev_db['users'].setdefault(self.USER_ID, {})['assessments'] = [legacy]
+
+        history = client.get('/api/assessment/history').get_json()
+        assert history['history'][0]['total_score_percentage'] == 10.0
+        assert client.get('/api/assessment/latest').get_json()[
+            'assessment']['total_score_percentage'] == 10.0
+
+        stored = dev_db['users'][self.USER_ID]['assessments'][0]
+        assert stored['total_score_percentage'] == 4.0
+        assert stored['answers'] == legacy['answers']
 
     def test_legacy_rows_are_normalized_over_real_store(self, e2e):
         """兼容路径：存储中已存在的修复前记录，经真实读链路出口换算为 0~100。"""
