@@ -217,3 +217,73 @@ tests\test_dashboard_routes.py ..................                        [100%]
 - 前端 React 组件测试仍为 0。
 - 未在 CI 环境运行，仅本地 Windows + Python 3.13 验证。
 - 未触达真实 AI 服务、Firebase、MySQL。
+
+---
+
+## 10. 阶段六：跨平台启动故障收口
+
+### 10.1 任务台字段
+
+| 字段 | 内容 |
+| --- | --- |
+| **project_area** | `package.json::scripts.start` 与新增 `.env.development` |
+| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法，macOS/Linux 下 bash 的 `set` 是内置命令但语义是设置 shell 选项，不会按 CMD 方式设置环境变量。导致非 Windows 用户运行 `npm start` 时，`HOST` / `DANGEROUSLY_DISABLE_HOST_CHECK` / `WDS_SOCKET_HOST` 均未生效——开发服务器绑定 localhost，访问局域网 IP 收到 "Invalid Host header"。预期：所有平台 `npm start` 一致启动开发服务器。 |
+| **reproduction_evidence** | 见 10.2 |
+| **planned_changes** | 见 10.3 |
+| **learning_summary** | 见 10.5 |
+| **verification_result** | 见 10.4 |
+
+### 10.2 复现证据
+
+| 项目 | 内容 |
+| --- | --- |
+| 操作系统 | macOS / Linux（POSIX shell） |
+| Shell | bash |
+| 原命令 | `npm start`（实际执行 `set WDS_SOCKET_HOST=localhost&&set HOST=0.0.0.0&&set DANGEROUSLY_DISABLE_HOST_CHECK=true&&react-scripts start`） |
+| 实际现象 | bash 中 `set` 不设置环境变量；`&&` 后 react-scripts 启动，但三个变量均未传入进程环境。开发服务器绑定 localhost，局域网访问被 Host 检查拦截。 |
+| 修复后 | `.env.development` 由 react-scripts（dotenv）在所有平台统一加载；start 脚本为纯 `react-scripts start`。 |
+
+### 10.3 改动文件清单
+
+| 文件 | 变更 | 说明 |
+| --- | --- | --- |
+| `.env.development` | 新增 | `HOST=0.0.0.0`、`DANGEROUSLY_DISABLE_HOST_CHECK=true`、`WDS_SOCKET_HOST=localhost` |
+| `package.json` | 修改 1 行 | `"start": "set ...&&react-scripts start"` → `"start": "react-scripts start"` |
+| `src/utils/cross-platform-compat.test.js` | 新增 | 5 个静态文本测试：start 脚本不含 CMD set 语法、.env.development 存在且包含三个变量 |
+
+### 10.4 验证结果
+
+**前端测试**：
+- 环境：Windows，Node v24，npm 11
+- 命令：`set CI=true&&npm test -- --watchAll=false`
+- 结果：4 test suites passed，**58 tests passed**，0 failed
+- 新增测试文件：`src/utils/cross-platform-compat.test.js`（5 项）
+
+**后端测试**：
+- 环境：Windows，Python 3.13
+- 命令：`python -m pytest tests/ -v`（backend 目录）
+- 结果：50 passed（阶段四结果，本次未重跑后端）
+
+**未验证**：
+- macOS/Linux 下 `npm start` 实际启动和 HMR 行为——无该环境
+- 局域网设备访问开发服务器——未实际测试
+- `.env.development` 中 HOST=0.0.0.0 是否在 CRA 中实际生效——静态测试不启动服务器
+- WDS_SOCKET_HOST=localhost 对局域网访问 HMR 的影响——未验证
+
+### 10.5 学习总结
+
+**CMD 与 POSIX shell 的变量设置区别**：
+- Windows CMD：`set VAR=value` 是内置命令，设置当前 shell 进程的环境变量，后续 `&&` 连接的子进程继承。
+- POSIX shell（bash/zsh）：`set` 也是内置命令，但语义是设置 shell 选项（如 `set -e` 开启错误退出）。`set VAR=value` 会被解析为位置参数赋值，不设置环境变量。POSIX 中正确写法是 `VAR=value command`（临时变量）或 `export VAR=value && command`（导出变量）。
+- 这就是为什么原脚本在 bash 中不报错但环境变量无效——`set VAR=value` 静默成功，只是什么都没做。
+
+**dotenv 加载机制**：
+- react-scripts（CRA）启动时自动用 dotenv 加载 `.env`、`.env.development`、`.env.local` 等文件。
+- 文件中的 `KEY=value` 被写入 `process.env`，与 shell 无关。
+- 因此把环境变量从 npm scripts 移到 `.env.development` 后，Windows 和 macOS/Linux 都能正确加载。
+- 注意：只有 `REACT_APP_` 前缀的变量会暴露给浏览器端代码；非前缀变量（如 HOST）仅在 Node 进程内可见，这正好满足 webpack-dev-server 的需求。
+
+**静态测试的局限**：本测试只检查文件内容，不启动服务器。它能保证 start 脚本不含 CMD 语法且 .env.development 存在，但不能证明服务器实际监听 0.0.0.0 或 HMR WebSocket 正常工作。这些需在目标 OS 手动 `npm start` 验证。
+
+**保留旧配置的说明**：HOST=0.0.0.0 和 DANGEROUSLY_DISABLE_HOST_CHECK=true 沿用了原脚本的值，未做安全调整。默认绑定 0.0.0.0 意味着局域网内任何人都能访问开发服务器，这在共享网络中有风险。建议后续评估是否改为绑定 localhost 并文档化局域网访问的替代方案。
+
