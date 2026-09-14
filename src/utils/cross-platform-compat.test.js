@@ -26,8 +26,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
-const envPath = path.resolve(__dirname, '..', '..', '.env.development');
+const pkgPath = path.resolve(__dirname, '..', '..', '..', 'package.json');
+const envPath = path.resolve(__dirname, '..', '..', '..', '.env.development');
 
 describe('start 脚本跨平台兼容', () => {
   test('package.json start 脚本不含 Windows CMD set 语法', () => {

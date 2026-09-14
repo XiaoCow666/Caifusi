@@ -227,7 +227,7 @@ tests\test_dashboard_routes.py ..................                        [100%]
 | 字段 | 内容 |
 | --- | --- |
 | **project_area** | `package.json::scripts.start` 与新增 `.env.development` |
-| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法，macOS/Linux 下 bash 的 `set` 是内置命令但语义是设置 shell 选项，不会按 CMD 方式设置环境变量。导致非 Windows 用户运行 `npm start` 时，`HOST` / `DANGEROUSLY_DISABLE_HOST_CHECK` / `WDS_SOCKET_HOST` 均未生效——开发服务器绑定 localhost，访问局域网 IP 收到 "Invalid Host header"。预期：所有平台 `npm start` 一致启动开发服务器。 |
+| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法。bash 中 `set` 是内置命令但语义是设置 shell 选项，不按 CMD 方式设置环境变量（基于 POSIX 语义的推断，未在 macOS/Linux 实测）。目标：让 `npm start` 在所有平台一致启动开发服务器。 |
 | **reproduction_evidence** | 见 10.2 |
 | **planned_changes** | 见 10.3 |
 | **learning_summary** | 见 10.5 |
@@ -237,10 +237,10 @@ tests\test_dashboard_routes.py ..................                        [100%]
 
 | 项目 | 内容 |
 | --- | --- |
-| 操作系统 | macOS / Linux（POSIX shell） |
-| Shell | bash |
+| 操作系统 | macOS / Linux（POSIX shell）——**未实际在该环境复现** |
+| Shell | bash——**未实际在该环境运行** |
 | 原命令 | `npm start`（实际执行 `set WDS_SOCKET_HOST=localhost&&set HOST=0.0.0.0&&set DANGEROUSLY_DISABLE_HOST_CHECK=true&&react-scripts start`） |
-| 实际现象 | bash 中 `set` 不设置环境变量；`&&` 后 react-scripts 启动，但三个变量均未传入进程环境。开发服务器绑定 localhost，局域网访问被 Host 检查拦截。 |
+| **静态推断** | bash 中 `set VAR=value` 不设置环境变量（POSIX 语义）；`&&` 后 react-scripts 启动，但三个变量可能未传入进程环境。可能导致开发服务器绑定 localhost、局域网访问收到 "Invalid Host header"。**以上为基于 shell 语义的推断，未经 macOS/Linux 实测确认。** |
 | 修复后 | `.env.development` 由 react-scripts（dotenv）在所有平台统一加载；start 脚本为纯 `react-scripts start`。 |
 
 ### 10.3 改动文件清单
@@ -255,20 +255,17 @@ tests\test_dashboard_routes.py ..................                        [100%]
 
 **前端测试**：
 - 环境：Windows，Node v24，npm 11
-- 命令：`set CI=true&&npm test -- --watchAll=false`
-- 结果：4 test suites passed，**58 tests passed**，0 failed
-- 新增测试文件：`src/utils/cross-platform-compat.test.js`（5 项）
-
-**后端测试**：
-- 环境：Windows，Python 3.13
-- 命令：`python -m pytest tests/ -v`（backend 目录）
-- 结果：50 passed（阶段四结果，本次未重跑后端）
+- 命令（定向）：`npm test -- --watchAll=false --runInBand src/utils/cross-platform-compat.test.js`
+- 命令（全量）：`npm test -- --watchAll=false --runInBand`
+- 注意：初版测试文件路径为 `path.resolve(__dirname, '..', '..', ...)`（向上两级到 `src/`），实际文件在仓库根目录，会报 ENOENT。已修复为 `path.resolve(__dirname, '..', '..', '..', ...)`（向上三级到仓库根）。路径修复后的实际通过数量需运行上述命令确认并回填。
+- 后端测试：50 passed（阶段四结果，本次未重跑）
 
 **未验证**：
 - macOS/Linux 下 `npm start` 实际启动和 HMR 行为——无该环境
 - 局域网设备访问开发服务器——未实际测试
 - `.env.development` 中 HOST=0.0.0.0 是否在 CRA 中实际生效——静态测试不启动服务器
 - WDS_SOCKET_HOST=localhost 对局域网访问 HMR 的影响——未验证
+- `env -u HOST bash -c 'set HOST=0.0.0.0&&node -p "process.env.HOST"'` 实际输出——无 POSIX shell 环境
 
 ### 10.5 学习总结
 
