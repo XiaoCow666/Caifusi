@@ -34,7 +34,7 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "set WDS_SOCKET_HOST=localhost&&set HOST=0.0.0.0&&set DANGEROUSLY_DISABLE_HOST_CHECK=true&&react-scripts start",
+    "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
