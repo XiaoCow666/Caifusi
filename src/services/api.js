@@ -191,6 +191,13 @@ export const sendMessageToCoach = async (data) => {
   } catch (error) {
     console.error('AI教练请求错误:', error);
 
+    // 阶段六：拦截器已对超时归一化出中文 userMessage，优先直接用，避免把 axios 原始英文 'timeout of Nms exceeded' 透传给用户
+    if (error.userMessage) {
+      throw new Error(error.userMessage);
+    }
+
+
+
     // 优先取后端 4xx/5xx 响应体中的中文 message（axios 错误对象自带 error.response），兜底取错误信息
     const errorMsg =
       (error.response && error.response.data && error.response.data.message) ||

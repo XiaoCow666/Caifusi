@@ -299,3 +299,23 @@ describe('阶段五：请求超时与超时错误归一化', () => {
     expect(plainErr.userMessage).toBeUndefined();
   });
 });
+
+// 阶段六（接管演练）：超时友好提示在聊天主链路真正生效
+describe('阶段六：sendMessageToCoach 消费超时友好提示', () => {
+  const payload = { message: '你好', userId: 'u' };
+  beforeEach(() => { jest.spyOn(console, 'error').mockImplementation(() => {}); });
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  test('超时错误带 userMessage → 直接抛中文提示，不透传英文 timeout', async () => {
+    const timeoutErr = new Error('timeout of 60000ms exceeded');
+    timeoutErr.code = 'ECONNABORTED';
+    timeoutErr.userMessage = '请求超时，服务器响应太慢，请稍后重试';
+    apiInstance.post.mockRejectedValue(timeoutErr);
+    await expect(sendMessageToCoach(payload)).rejects.toThrow('请求超时，服务器响应太慢，请稍后重试');
+  });
+
+  test('无 userMessage 的普通错误仍回退 error.message（兼容不回归）', async () => {
+    apiInstance.post.mockRejectedValue(new Error('some raw failure'));
+    await expect(sendMessageToCoach(payload)).rejects.toThrow('AI教练回复错误: some raw failure');
+  });
+});
