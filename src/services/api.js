@@ -72,6 +72,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL ||
 // 创建axios实例
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 60000, // 阶段五：60s 超时，防后端/上游卡住时浏览器无限转圈永不失败
   headers: {
     'Content-Type': 'application/json',
   },
@@ -97,6 +98,12 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    // 阶段五：超时/网络断连归一化为稳定中文提示，调用方读 error.userMessage 即可
+    const isTimeout = error && (error.code === 'ECONNABORTED' ||
+      (typeof error.message === 'string' && /timeout of \d+ms exceeded/i.test(error.message)));
+    if (isTimeout) {
+      error.userMessage = '请求超时，服务器响应太慢，请稍后重试';
+    }
     // 处理401错误 (未认证)
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('authToken');
