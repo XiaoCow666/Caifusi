@@ -227,7 +227,7 @@ tests\test_dashboard_routes.py ..................                        [100%]
 | 字段 | 内容 |
 | --- | --- |
 | **project_area** | `package.json::scripts.start` 与新增 `.env.development` |
-| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法。bash 中 `set` 是内置命令但语义是设置 shell 选项，不按 CMD 方式设置环境变量（基于 POSIX 语义的推断，未在 macOS/Linux 实测）。目标：让 `npm start` 在所有平台一致启动开发服务器。 |
+| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法。**已证实**：CMD 语义下设置环境变量；**推断（未经 macOS/Linux 实测）**：bash 的 `set` 是内置命令但语义是设置 shell 选项，`set VAR=value` 不设置环境变量，导致 HOST 等三个变量可能未传入进程环境。**未证实**：该问题是否导致"无法启动"——实际现象更可能是"能启动但绑定 localhost、局域网访问被 Host 检查拦截"。目标：让 `npm start` 在所有平台一致启动。 |
 | **reproduction_evidence** | 见 10.2 |
 | **planned_changes** | 见 10.3 |
 | **learning_summary** | 见 10.5 |
@@ -253,12 +253,18 @@ tests\test_dashboard_routes.py ..................                        [100%]
 
 ### 10.4 验证结果
 
-**前端测试**：
-- 环境：Windows，Node v24，npm 11
-- 命令（定向）：`npm test -- --watchAll=false --runInBand src/utils/cross-platform-compat.test.js`
-- 命令（全量）：`npm test -- --watchAll=false --runInBand`
-- 注意：初版测试文件路径为 `path.resolve(__dirname, '..', '..', ...)`（向上两级到 `src/`），实际文件在仓库根目录，会报 ENOENT。已修复为 `path.resolve(__dirname, '..', '..', '..', ...)`（向上三级到仓库根）。路径修复后的实际通过数量需运行上述命令确认并回填。
-- 后端测试：50 passed（阶段四结果，本次未重跑）
+**前端测试（本次实测）**：
+- 环境：Windows，Node v24，npm 11，jest 27.5.1
+- 定向命令：`node node_modules/jest/bin/jest.js --watchAll=false --runInBand --config=jest.temp.config.js --testPathPattern="cross-platform-compat"`（沙箱中 react-scripts 封装扫描异常，改用直接 jest + react-scripts transform 配置，等价于 `npm test -- --watchAll=false --runInBand`）
+- 定向结果：**5 passed**（cross-platform-compat.test.js：start 脚本无 CMD set 语法 + .env.development 三个变量）
+- 全量命令：`node node_modules/jest/bin/jest.js --watchAll=false --runInBand --config=jest.temp.config.js`
+- 全量结果：**4 test suites passed, 58 tests passed, 0 failed**（含 api.test.js 32、testApi.test.js、routeRedirect.test.js、cross-platform-compat.test.js 5）
+- 退出码：0（PowerShell 对 jest 的 stderr 输出有 NativeCommandError 噪音，但 jest 自身报告全部通过）
+- 路径确认：`src/utils/` 向上两级 = 仓库根目录（`path.resolve(__dirname,'..','..')`），定向测试通过证明读取到根目录的 package.json 和 .env.development
+- 提交 SHA：`5ce7577`（含路径修正与文档标注）
+
+**后端测试**：
+- 50 passed（阶段四结果，本次未重跑）
 
 **未验证**：
 - macOS/Linux 下 `npm start` 实际启动和 HMR 行为——无该环境
