@@ -12,9 +12,12 @@
 
 设计原则（与前端回归一致）：
   · 零新增依赖：仅用 Python 标准库 unittest，不引入 pytest；
-  · 离线可跑：实例化时不设 ZHIPUAI_API_KEY，client=None，不触发任何网络；
-  · 锁定现状语义：不改动生产实现，只把当前行为固化为断言；健壮性用例顺带
-    覆盖「评估结果畸形时不抛异常、回退基础提示词」这一既有容错分支。
+  · 离线可跑：用 patch.dict 限定作用域置空密钥（自动恢复），实例化走
+    client=None，不触发任何网络、不连数据库；
+  · 一个真实修复（STAGE4-FIX-001）：filter_thinking_tags 旧实现区分大小写，
+    模型输出 <THINK>/<Think> 时内部推理会泄漏给用户；已在生产代码加
+    re.IGNORECASE，本文件 test_strips_uppercase... 即「修复前失败、修复后通过」的回归。
+  · 其余用例锁定现状语义：不改动现有行为，只把当前输出固化为断言。
 
 运行命令（仓库根目录）：
     cd backend
@@ -25,14 +28,15 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 # 让本测试无论从哪个目录启动都能 import 到 app.services.*
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-# 确保不读真实密钥：测试全程在「未配置密钥」的离线分支上运行
-os.environ.pop("ZHIPUAI_API_KEY", None)
+# 注意：不在模块顶层永久改环境变量；改为在需要实例化服务的 TestCase 里
+# 用 patch.dict 做「限定作用域、自动恢复」的密钥置空，避免依赖执行顺序。
 
 from app.services.zhipuai_service import filter_thinking_tags, ZhipuAIService  # noqa: E402
 
@@ -51,6 +55,20 @@ class TestFilterThinkingTags(unittest.TestCase):
             filter_thinking_tags("a<think>x</think>b<think>y</think>c"),
             "abc",
         )
+
+    def test_strips_uppercase_and_mixedcase_think_blocks(self):
+        # 回归（STAGE4-FIX-001）：模型偶尔输出大写/混合大小写的思考标签，
+        # 旧实现区分大小写，会把内部推理原样泄漏给用户。修复后应一并剥离。
+        self.assertEqual(
+            filter_thinking_tags("<THINK>推理过程</THINK>你好"),
+            "你好",
+        )
+        self.assertEqual(
+            filter_thinking_tags("<Think>reasoning</Think>answer"),
+            "answer",
+        )
+        # 不应误伤普通文本里的 "thinking" 字样（标签要求 think 后紧跟 >）
+        self.assertIn("thinking", filter_thinking_tags("this is thinking text"))
 
     def test_dotall_matches_across_newlines(self):
         # <think> 块内部可以跨多行；块前后各留的换行被压缩为单个空行
@@ -75,7 +93,14 @@ class TestCategoryName(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # 限定作用域置空密钥（自动恢复），强制走 client=None 离线分支
+        cls._patcher = patch.dict(os.environ, {"ZHIPUAI_API_KEY": ""})
+        cls._patcher.start()
         cls.svc = ZhipuAIService()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._patcher.stop()
 
     def test_known_categories(self):
         self.assertEqual(self.svc._get_category_name("savings"), "储蓄能力")
@@ -92,7 +117,13 @@ class TestBuildSystemPrompt(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls._patcher = patch.dict(os.environ, {"ZHIPUAI_API_KEY": ""})
+        cls._patcher.start()
         cls.svc = ZhipuAIService()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._patcher.stop()
 
     def test_no_results_returns_base_prompt(self):
         p = self.svc._build_system_prompt(None)
@@ -119,8 +150,10 @@ class TestBuildSystemPrompt(unittest.TestCase):
         # 强项 >=70、弱项 <=40
         self.assertIn("储蓄能力", p)
         self.assertIn("债务管理", p)
-        # 建议只取前 3 条
+        # 建议只取前 3 条：第 1/2/3 条保留，第 4 条被丢弃
         self.assertIn("建预算", p)
+        self.assertIn("增储蓄", p)
+        self.assertIn("控支出", p)
         self.assertNotIn("多余建议", p)
 
     def test_malformed_results_does_not_raise(self):

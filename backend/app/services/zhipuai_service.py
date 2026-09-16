@@ -11,7 +11,7 @@ def filter_thinking_tags(text):
     保持Markdown格式不变
     """
     # 使用非贪婪匹配来移除<think>...</think>和任何嵌套的标签
-    filtered_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    filtered_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
     # 移除可能存在的空行（连续多个换行符）
     filtered_text = re.sub(r'\n{3,}', '\n\n', filtered_text)
