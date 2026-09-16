@@ -27,6 +27,7 @@ jest.mock('axios', () => {
   const state = {
     requestHandlers: [],
     responseHandlers: [],
+    createConfig: [],
   };
   const instance = {
     get: jest.fn(),
@@ -48,7 +49,7 @@ jest.mock('axios', () => {
       },
     },
   };
-  return { create: jest.fn(() => instance), __test: state };
+  return { create: jest.fn((cfg) => { state.createConfig.push(cfg); return instance; }), __test: state };
 });
 
 import axios from 'axios';
@@ -256,5 +257,26 @@ describe('业务导出函数：请求路由与错误语义回归（扩展）', (
       apiInstance.get.mockResolvedValue({ data });
       await expect(getDashboardOverview()).resolves.toEqual(data);
     });
+  });
+});
+
+// 阶段五（性能/可靠性）：请求超时配置与超时错误归一化（兼容行为/用户体验）
+describe('阶段五：请求超时与超时错误归一化', () => {
+  test('共享实例配置了 60s 超时（修复前未设置，浏览器可无限等待）', () => {
+    expect(axios.__test.createConfig[0].timeout).toBe(60000);
+  });
+
+  test('超时错误被归一化为稳定中文 userMessage', async () => {
+    const { onRejected } = responseHandlers[0];
+    const timeoutErr = { code: 'ECONNABORTED', message: 'timeout of 60000ms exceeded' };
+    await expect(Promise.resolve(onRejected(timeoutErr))).rejects.toBe(timeoutErr);
+    expect(timeoutErr.userMessage).toBe('请求超时，服务器响应太慢，请稍后重试');
+  });
+
+  test('普通错误（500）不附加超时文案，错误对象身份不变', async () => {
+    const { onRejected } = responseHandlers[0];
+    const plainErr = { response: { status: 500 } };
+    await expect(Promise.resolve(onRejected(plainErr))).rejects.toBe(plainErr);
+    expect(plainErr.userMessage).toBeUndefined();
   });
 });
