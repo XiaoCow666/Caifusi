@@ -1,0 +1,8 @@
+# 开发与测试依赖
+# 安装：pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+# 测试框架
+pytest>=7.0.0
+
+# Flask 测试客户端所需（Flask 3.x 已内置 test_client，此处显式声明以防 CI 最小安装环境缺失）
+flask>=3.0.0

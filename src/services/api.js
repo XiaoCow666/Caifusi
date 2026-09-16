@@ -19,12 +19,20 @@
  *     api.post('/coach/chat')          ✅
  *     api.post('/api/coach/chat')      ❌ 会得到 /api/api/coach/chat
  *
- * 【业务包络】后端接口"成功/失败"分两种约定，新增封装前先确认目标接口属于哪种：
- *   · 返回 { status: 'success' | 'error', message, ... } 包络的接口（如 /coach/chat、
- *     /dashboard/*）：不能仅凭 HTTP 200 判定成功——须校验 response.data.status === 'success'，
- *     error 时抛后端 message（完整写法见 sendMessageToCoach）；
- *   · 以 HTTP 状态码表达失败的接口（如 /assessment/*、/auth/* 的 4xx/5xx）：非 2xx 会由
- *     axios 抛错并进入响应拦截器，2xx 直接返回数据即可。
+ * 【业务包络】后端接口"成功/失败"统一约定（新增封装前以 backend/app/routes/*.py
+ *   实际实现为准，勿凭猜测）：
+ *   · 失败信号一律走 HTTP 状态码：非 2xx（400/401/404/500…）由 axios 抛错进入响应
+ *     拦截器，调用方 catch 中从 error.response.data.message 取后端中文提示；
+ *   · 2xx 响应体形状按接口分组：
+ *       - /coach/chat：2xx 返回 { status:'success', reply } 包络。sendMessageToCoach
+ *         保留"HTTP 200 但 status !== 'success' 即抛错"的防御分支（防网关吞错/接口变更，
+ *         见其实现注释）；
+ *       - /dashboard/*：2xx 恒为 { status:'success', ... } 包络（overview 等 GET 带
+ *         data；goals 写操作 201/200 带 message ± data）。业务失败一定以 400/401/500
+ *         表达、不会随 2xx 出现 → 封装层（getDashboardOverview 等）原样透传整个响应体，
+ *         由调用方按需取 .data，**不要再加 status 校验**（对当前后端属不可达分支，
+ *         透传语义已由 api.test.js 契约用例锁定）；
+ *       - /assessment/*、/auth/*：2xx 为普通 JSON（无 status 包络），失败 4xx/5xx。
  *
  * 【全局配置位置】公共配置统一修改下方 axios.create() 参数块与拦截器，改 1 处全局生效：
  *     - baseURL：API_BASE_URL（本地开发 = http://localhost:5001/api；GitHub Pages /
@@ -37,9 +45,10 @@
  *       const res = await api.get('/xxx/data', { params }); // path 不拼 /api
  *       return res.data;
  *     };
- *   ⚠️ 模板仅覆盖"HTTP 状态码表达失败"类接口；若新接口属上方"success/error 包络"类
- *     （如 /coach/chat、/dashboard/*），必须在 return 前校验 status 并抛后端 message——
- *     不要让 HTTP 200 + {status:'error'} 静默通过（照抄 sendMessageToCoach 的包络分支即可）。
+ *   ⚠️ 本模板适用于"失败走 HTTP 状态码"的后端接口（后端现状即如此）；仅当目标接口
+ *     实现/网关存在"HTTP 200 + {status:'error'}"的可能（目前仅 /coach/chat 因历史
+ *     网关场景保留防御校验，写法见 sendMessageToCoach）时才需补 status 校验分支；
+ *     不要仅凭旧版注释给 /dashboard/* 等接口添加 status 校验（对本后端不可达）。
  *
  * 【历史说明】本文件曾存在 fetchApi() 原生 fetch 封装（全仓 0 调用死代码）与
  *             sendMessageToCoach 内联 fetch（硬编码 localhost + '/api/coach/chat' 路径），

@@ -150,7 +150,9 @@ def create_goal(user_info):
     """
     try:
         user_id = user_info['uid']
-        goal_data = request.get_json()
+        # silent=True：空 body / 非法 JSON 返回 None 而非抛 BadRequest，
+        # 与 coach /chat、assessment /submit 输入校验保持一致（畸形请求 → 400 而非 500）
+        goal_data = request.get_json(silent=True)
         
         if not goal_data:
             return jsonify({

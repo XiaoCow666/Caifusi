@@ -1,9 +1,169 @@
 from flask import Blueprint, request, jsonify, current_app
 import logging
+import math
 
 logger = logging.getLogger('assessment_routes')
 
 assessment_bp = Blueprint('assessment_bp', __name__)
+
+# 每题最高选项分值（src/pages/Assessment.js 的 questions：选项 score 取值 1~4）。
+# total_score 是「1~4 平均分」，total_score_percentage 是「0~100 得分率」，
+# 两者口径不同，换算基准由该常量给出。
+MAX_OPTION_SCORE = 4.0
+
+# 前端问卷总题数（src/pages/Assessment.js 的 questions.length：10 个 category 各 1 题）。
+# 前端算得分率时分母固定为「全部题数 × 单题满分」，跳过未作答的题目按 0 分计。
+# 历史记录不保存当时的题数，故还原旧数据时只能依赖该常量。
+TOTAL_QUESTION_COUNT = 10
+
+# 口径标识：显式声明该记录的 total_score_percentage 是 0~100 得分率。
+# 修复前落库的记录没有这个字段，因此「带标识」＝新记录、「不带标识」＝旧记录或未知来源，
+# 这是读取侧识别旧数据的唯一可靠依据（不再靠「百分比是否等于平均分」猜）。
+PERCENTAGE_SCALE_FIELD = 'total_score_percentage_scale'
+PERCENTAGE_SCALE_0_100 = 'percent_0_100'
+
+# 旧写入侧落库的是 round(total_score, 1)，浮点比较留容差
+_LEGACY_EPSILON = 0.05
+
+
+def _is_number(value):
+    """数值判定：排除 bool（int 的子类）与非有限值（NaN/Inf）。"""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _is_valid_percentage(value):
+    """0~100 得分率的取值范围判定。"""
+    return _is_number(value) and 0.0 <= float(value) <= 100.0
+
+
+def _frontend_round(value):
+    """复刻前端 Math.round()：四舍五入、.5 向 +∞ 取整。
+
+    Python 内置 round() 是银行家舍入（round(2.5) == 2），JS 的 Math.round 则进一位，
+    两者在 .5 上结果不同。得分率恒非负，故 floor(x + 0.5) 与 Math.round 完全等价。
+    """
+    return math.floor(value + 0.5)
+
+
+def _mean_to_percentage(total_score):
+    """把 1~4 分制的平均分换算成 0~100 得分率；无法换算时返回 0.0。"""
+    if not _is_number(total_score):
+        return 0.0
+    return round(float(total_score) / MAX_OPTION_SCORE * 100, 1)
+
+
+def _answers_to_percentage(answers):
+    """按前端固定分母从原始作答还原 0~100 得分率；无法还原时返回 None。
+
+    旧记录的 answers 与 total_score 同源（同一次提交的同一批作答），只要 answers
+    完整，就能确定性还原前端当时算出的得分率：
+    Math.round(sum(各题得分) / (总题数 × 单题满分) × 100)。
+    跳题场景的关键差异正在于此——只答一道 4 分题时，前端口径是 4/40 = 10%，
+    而「按已答题目求平均再换算」会得到 100%。
+
+    取整必须与前端一致：单题得 1 分时是 2.5%，前端 Math.round 提交 3%，这里若沿用
+    Python 的 round() 会得到 2.5，历史恢复值就与当初提交值对不上；单题得 3 分同理
+    （7.5% vs 8%）。故用 _frontend_round 而非内置 round。
+    """
+    if not isinstance(answers, dict) or not answers:
+        return None
+
+    total = 0.0
+    for answer in answers.values():
+        if not isinstance(answer, dict) or not _is_number(answer.get('score')):
+            return None
+        total += float(answer['score'])
+
+    percentage = total / (TOTAL_QUESTION_COUNT * MAX_OPTION_SCORE) * 100
+    # 问卷扩容后旧记录的作答数可能多于当前总题数，得分率收敛到上界
+    return float(min(_frontend_round(percentage), 100.0))
+
+
+def _recover_legacy_percentage(record):
+    """无口径标识的记录：尽力还原 0~100 得分率（不声称一切都能确定性恢复）。
+
+    1) answers 可用 → 按固定分母确定性还原。
+    2) answers 缺失或结构不可识别 → 信息不足：既不知道当时答了几题，也无法区分
+       「跳题」与「全部作答」。此时只能按平均分换算，该值在「全部题都作答」时
+       恰好等于正确得分率，跳题时是高估上界（例如只答一道 4 分题会算成 100%，
+       真值 10%）。这是明确记录在案的尽力回退，不是确定性恢复。
+    """
+    recovered = _answers_to_percentage(record.get('answers'))
+    if recovered is not None:
+        return recovered
+
+    return _mean_to_percentage(record.get('total_score'))
+
+
+def _resolve_total_score_percentage(submitted, total_score):
+    """解析本次提交的 0~100 得分率。
+
+    优先采信前端随请求提交的 total_score_percentage：前端的分母固定为全部题数
+    （Assessment.js:431，跳过未答题目按 0 分计），与后端「按已答题目求平均」不同，
+    跳题时两者相差一个数量级，因此以前端为准。前端未提交或取值非法时，
+    按平均分换算成 0~100 回退——修复前此处直接写入 round(total_score, 1)，
+    使 1~4 尺度的值进入了语义为百分比（schema.sql:37「评分百分比/得分率」）的字段。
+    回退值沿用以「已答题目」为分母的换算（跳题时偏高），该口径由既有回归测试锁定，
+    本次不动；它与写入侧的口径标识配套，读回时原样返回，不会二次换算。
+    """
+    if _is_valid_percentage(submitted):
+        return round(float(submitted), 1)
+
+    return _mean_to_percentage(total_score)
+
+
+def _normalize_stored_percentage(record):
+    """读取侧兼容：只在能识别口径时换算，不做无依据的推断。
+
+    识别规则（按优先级）：
+
+      1. 带口径标识 PERCENTAGE_SCALE_FIELD → 新记录，存储值本身就是 0~100 得分率，
+         原样采信。这条保证「提交值 == 回读值」：提交百分比 4、平均分 4 的记录
+         不会因为「百分比恰好等于平均分」被误判成旧记录而变成 100。
+      2. 无标识，且存储值与 round(平均分, 1) 不等 → 不可能是旧记录
+         （修复前的写入侧恒写 round(total_score, 1)），按合法得分率原样透传。
+         跳题产生的合法小百分比（如 10.0）走这条，不会被误换算。
+      3. 其余（无标识，且存储值缺失、非法或恰好等于 round(平均分, 1)）
+         → 按旧记录交由 _recover_legacy_percentage 还原。
+
+    注意第 3 条里的「恰好等于平均分」本身是歧义情形：新记录也可能合法地等于平均分。
+    有口径标识时第 1 条会先拦住，落到这里的只可能是旧记录、或未携带标识写入的存储路径。
+    历史上该字段最小值为 25 的说法是错的——跳题让得分率可以低至 2.5（1/40），
+    与 1~4 的平均分区间重叠，故「两值相等」并不是旧记录的确定性特征。
+
+    兼容性边界（不声称确定性恢复）：
+      · 带标识的新记录、以及 answers 可用的旧记录 → 确定性。
+      · answers 缺失的旧记录 → 只能按平均分换算，是上界近似（见 _recover_legacy_percentage）。
+      · 标识随记录一起持久化，三条存储路径都覆盖：内存与 Firestore 整体存取记录；
+        MySQL 由 schema.sql 的 total_score_percentage_scale 列承载（含给已有库的幂等
+        补列迁移），INSERT 与 SELECT 都带上该列，因此 MySQL 往返后仍是新记录。
+        仅当老库未执行迁移、SELECT 读不到该列时才会退化为 None，等同旧记录处理。
+
+    仅作用于响应出口，不修改底层存储，因此可随代码回滚。
+    """
+    stored = record.get('total_score_percentage')
+
+    # 1) 新记录：带口径标识，存储值即 0~100 得分率
+    if record.get(PERCENTAGE_SCALE_FIELD) == PERCENTAGE_SCALE_0_100:
+        if _is_valid_percentage(stored):
+            return round(float(stored), 1)
+        # 标识与实际值矛盾：不猜存储值，退回按旧记录还原
+        return _recover_legacy_percentage(record)
+
+    # 2) 无标识：与平均分不符者不可能是旧记录，按合法得分率透传
+    if _is_valid_percentage(stored):
+        stored_value = float(stored)
+        mean = record.get('total_score')
+        if not _is_number(mean) \
+                or abs(stored_value - round(float(mean), 1)) >= _LEGACY_EPSILON:
+            return stored_value
+
+    # 3) 旧记录（或存储值缺失/非法）
+    return _recover_legacy_percentage(record)
 
 
 def _get_user_data_service():
@@ -73,6 +233,23 @@ def submit_assessment(user_info):
     user_id = user_info['uid']
 
     scores = assessment_data.get('scores', {})
+
+    # 校验 scores 为「字段名 -> 数值」的对象：修复前 scores 为数组时 .values()
+    # 抛 AttributeError，取值为字符串/None 时 sum() 抛 TypeError——均未被捕获，
+    # 被外层兜成 500。与 coach /chat 输入校验（PR #12）一致：畸形输入返回 400。
+    if not isinstance(scores, dict):
+        return jsonify({"error": "scores 必须为对象"}), 400
+
+    non_numeric = [
+        key for key, value in scores.items()
+        # bool 是 int 的子类，需显式排除 True/False
+        if isinstance(value, bool) or not isinstance(value, (int, float))
+    ]
+    if non_numeric:
+        return jsonify({
+            "error": f"scores 必须全部为数值字段: {', '.join(sorted(non_numeric))}"
+        }), 400
+
     total_score = sum(scores.values()) / len(scores) if scores else 0
 
     # Build complete assessment with percentage scores for history display
@@ -82,7 +259,12 @@ def submit_assessment(user_info):
         'answers': assessment_data['answers'],
         'scores': scores,
         'total_score': total_score,
-        'total_score_percentage': round(total_score, 1),
+        'total_score_percentage': _resolve_total_score_percentage(
+            assessment_data.get('total_score_percentage'), total_score
+        ),
+        # 口径标识：把「上面这个百分比是 0~100 得分率」写进记录本身，
+        # 使读取侧无需猜测即可区分新记录与修复前的旧记录（见 _normalize_stored_percentage）
+        PERCENTAGE_SCALE_FIELD: PERCENTAGE_SCALE_0_100,
         'category_scores_percentage': category_scores_pct,
         'categories': assessment_data.get('categories', {}),
         'recommendations': _generate_recommendations(scores),
@@ -144,7 +326,14 @@ def get_history(user_info):
     ordered by time (newest first). Used by the frontend history view.
     """
     user_id = user_info['uid']
-    limit = min(int(request.args.get('limit', 50)), 100)
+    limit_raw = request.args.get('limit', '50')
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        # 修复前 int('abc') 抛 ValueError 未捕获 -> 500；畸形输入应返回 400
+        return jsonify({"error": "limit 参数必须为整数"}), 400
+    # 上界与旧实现一致收敛到 100；下界收敛到 1，避免负数透传到存储层
+    limit = max(1, min(limit, 100))
 
     try:
         uds = _get_user_data_service()
@@ -162,7 +351,7 @@ def get_history(user_info):
         history.append({
             'id': record.get('id', ''),
             'timestamp': record.get('timestamp', ''),
-            'total_score_percentage': record.get('total_score_percentage', record.get('total_score', 0)),
+            'total_score_percentage': _normalize_stored_percentage(record),
             'category_scores_percentage': record.get('category_scores_percentage', {}),
             'recommendations': record.get('recommendations', []),
             'completed': record.get('completed', True),
@@ -195,7 +384,11 @@ def get_latest(user_info):
     if not data:
         return jsonify({"assessment": None}), 200
 
-    return jsonify({"assessment": data}), 200
+    # 与 /history 同口径；拷贝后再换算，避免改动底层存储中的记录
+    normalized = dict(data)
+    normalized['total_score_percentage'] = _normalize_stored_percentage(data)
+
+    return jsonify({"assessment": normalized}), 200
 
 
 def _generate_recommendations(scores):

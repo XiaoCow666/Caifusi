@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS `assessments` (
     `scores` JSON DEFAULT NULL COMMENT '各个模块的原始评分 (JSON格式)',
     `total_score` DOUBLE NOT NULL COMMENT '平均总得分',
     `total_score_percentage` DOUBLE NOT NULL COMMENT '评分百分比/得分率',
+    `total_score_percentage_scale` VARCHAR(32) DEFAULT NULL COMMENT '得分率口径标识 (percent_0_100=修复后新记录; NULL=修复前的旧记录，读取侧按旧口径还原)',
     `category_scores_percentage` JSON DEFAULT NULL COMMENT '各维度的百分制得分 (JSON格式)',
     `categories` JSON DEFAULT NULL COMMENT '维度分类具体数据 (JSON格式)',
     `recommendations` JSON DEFAULT NULL COMMENT '理财建议列表 (JSON格式)',
@@ -74,6 +75,27 @@ CREATE TABLE IF NOT EXISTS `coach_messages` (
     CONSTRAINT `fk_messages_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
     INDEX `idx_messages_user` (`user_id`, `timestamp` ASC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI教练对话记录表';
+
+
+-- ==========================================
+-- 7. 兼容迁移：给已存在的库补上得分率口径标识列
+-- ==========================================
+-- CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，所以这里单独处理。
+-- MySQL 8 不支持 ADD COLUMN IF NOT EXISTS，故用 information_schema 判断 + 动态 SQL，
+-- 保证本脚本可重复执行（新库走上面的建表语句，老库走这里的 ALTER）。
+-- 老库补列后历史行该列为 NULL，读取侧即按「修复前的旧记录」还原得分率。
+SET @scale_col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'assessments'
+      AND COLUMN_NAME = 'total_score_percentage_scale'
+);
+SET @scale_ddl := IF(@scale_col_exists = 0,
+    'ALTER TABLE `assessments` ADD COLUMN `total_score_percentage_scale` VARCHAR(32) DEFAULT NULL COMMENT ''得分率口径标识 (percent_0_100=修复后新记录、NULL=修复前的旧记录)'' AFTER `total_score_percentage`',
+    'SELECT 1');
+PREPARE scale_stmt FROM @scale_ddl;
+EXECUTE scale_stmt;
+DEALLOCATE PREPARE scale_stmt;
 
 
 -- ==========================================
