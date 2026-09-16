@@ -227,7 +227,7 @@ tests\test_dashboard_routes.py ..................                        [100%]
 | 字段 | 内容 |
 | --- | --- |
 | **project_area** | `package.json::scripts.start` 与新增 `.env.development` |
-| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法。**已证实**：CMD 语义下设置环境变量；**推断（未经 macOS/Linux 实测）**：bash 的 `set` 是内置命令但语义是设置 shell 选项，`set VAR=value` 不设置环境变量，导致 HOST 等三个变量可能未传入进程环境。**未证实**：该问题是否导致"无法启动"——实际现象更可能是"能启动但绑定 localhost、局域网访问被 Host 检查拦截"。目标：让 `npm start` 在所有平台一致启动。 |
+| **problem_goal** | 原 start 脚本使用 Windows CMD `set VAR=value&&...` 语法。**已证实**：CMD 语义下设置环境变量；**推断（未经 macOS/Linux 实测）**：bash 的 `set` 是内置命令但语义是设置 shell 选项，`set VAR=value` 不按 CMD 语义导出环境变量，导致 HOST 等三个变量可能未传入进程环境。**未证实**：该问题是否导致"无法启动"——实际现象更可能是"能启动但变量未生效"。目标：让 `npm start` 在所有平台一致启动。**安全目标（评审 P1）**：迁移后变量在所有平台生效，必须避免扩大 `HOST=0.0.0.0` + 禁用 Host 校验的暴露面 → 默认改为 `HOST=localhost`、保留 Host 校验。 |
 | **reproduction_evidence** | 见 10.2 |
 | **planned_changes** | 见 10.3 |
 | **learning_summary** | 见 10.5 |
@@ -247,30 +247,30 @@ tests\test_dashboard_routes.py ..................                        [100%]
 
 | 文件 | 变更 | 说明 |
 | --- | --- | --- |
-| `.env.development` | 新增 | `HOST=0.0.0.0`、`DANGEROUSLY_DISABLE_HOST_CHECK=true`、`WDS_SOCKET_HOST=localhost` |
+| `.env.development` | 新增 | 最终值：`HOST=localhost`、`WDS_SOCKET_HOST=localhost`；**不设置** `DANGEROUSLY_DISABLE_HOST_CHECK`（安全收紧，见 10.5） |
 | `package.json` | 修改 1 行 | `"start": "set ...&&react-scripts start"` → `"start": "react-scripts start"` |
-| `src/utils/cross-platform-compat.test.js` | 新增 | 5 个静态文本测试：start 脚本不含 CMD set 语法、.env.development 存在且包含三个变量 |
+| `src/utils/cross-platform-compat.test.js` | 新增 | 5 个静态文本测试：start 脚本不含 CMD set 语法；.env.development 存在、HOST=localhost、未禁用 Host 检查、含 WDS_SOCKET_HOST |
 
 ### 10.4 验证结果
 
-**前端测试（本次实测）**：
+**前端测试（本次实测，2026-09-16）**：
 - 环境：Windows，Node v24，npm 11，jest 27.5.1
-- 定向命令：`node node_modules/jest/bin/jest.js --watchAll=false --runInBand --config=jest.temp.config.js --testPathPattern="cross-platform-compat"`（沙箱中 react-scripts 封装扫描异常，改用直接 jest + react-scripts transform 配置，等价于 `npm test -- --watchAll=false --runInBand`）
-- 定向结果：**5 passed**（cross-platform-compat.test.js：start 脚本无 CMD set 语法 + .env.development 三个变量）
+- 定向命令：`node node_modules/jest/bin/jest.js --watchAll=false --runInBand --config=jest.temp.config.js --testPathPattern="cross-platform-compat"`（沙箱中 react-scripts 封装扫描异常，改用直接 jest + react-scripts transform 配置。jest.temp.config.js 为沙箱验证专用临时文件，内容即 react-scripts createJestConfig 的 transform/testEnvironment/moduleNameMapper/resetMocks 子集，未提交到仓库；用户本地可用标准 `npm test -- --watchAll=false --runInBand --testPathPattern=cross-platform-compat` 复现）
+- 定向结果：**5 passed**（start 脚本无 CMD set 语法；HOST=localhost；未禁用 Host 检查；WDS_SOCKET_HOST=localhost）
 - 全量命令：`node node_modules/jest/bin/jest.js --watchAll=false --runInBand --config=jest.temp.config.js`
-- 全量结果：**4 test suites passed, 58 tests passed, 0 failed**（含 api.test.js 32、testApi.test.js、routeRedirect.test.js、cross-platform-compat.test.js 5）
+- 全量结果：**4 test suites passed, 58 tests passed, 0 failed**
 - 退出码：0（PowerShell 对 jest 的 stderr 输出有 NativeCommandError 噪音，但 jest 自身报告全部通过）
 - 路径确认：`src/utils/` 向上两级 = 仓库根目录（`path.resolve(__dirname,'..','..')`），定向测试通过证明读取到根目录的 package.json 和 .env.development
-- 提交 SHA：`5ce7577`（含路径修正与文档标注）
+- 对应提交：`5ce7577`（路径修正）→ `04e2285`（填入实测结果）→ 本次安全收紧待提交
 
 **后端测试**：
-- 50 passed（阶段四结果，本次未重跑）
+- 50 passed（阶段四历史结果，本次未重跑，不作为本次验证依据）
 
 **未验证**：
 - macOS/Linux 下 `npm start` 实际启动和 HMR 行为——无该环境
 - 局域网设备访问开发服务器——未实际测试
-- `.env.development` 中 HOST=0.0.0.0 是否在 CRA 中实际生效——静态测试不启动服务器
-- WDS_SOCKET_HOST=localhost 对局域网访问 HMR 的影响——未验证
+- `.env.development` 中 HOST=localhost 在 CRA 中的实际生效——静态测试不启动服务器
+- WDS_SOCKET_HOST=localhost 对 HMR 的影响——未验证
 - `env -u HOST bash -c 'set HOST=0.0.0.0&&node -p "process.env.HOST"'` 实际输出——无 POSIX shell 环境
 
 ### 10.5 学习总结
@@ -286,7 +286,7 @@ tests\test_dashboard_routes.py ..................                        [100%]
 - 因此把环境变量从 npm scripts 移到 `.env.development` 后，Windows 和 macOS/Linux 都能正确加载。
 - 注意：只有 `REACT_APP_` 前缀的变量会暴露给浏览器端代码；非前缀变量（如 HOST）仅在 Node 进程内可见，这正好满足 webpack-dev-server 的需求。
 
-**静态测试的局限**：本测试只检查文件内容，不启动服务器。它能保证 start 脚本不含 CMD 语法且 .env.development 存在，但不能证明服务器实际监听 0.0.0.0 或 HMR WebSocket 正常工作。这些需在目标 OS 手动 `npm start` 验证。
+**静态测试的局限**：本测试只检查文件内容，不启动服务器。它能保证 start 脚本不含 CMD 语法且 .env.development 配置正确，但不能证明服务器实际监听 localhost 或 HMR WebSocket 正常工作。这些需在目标 OS 手动 `npm start` 验证。
 
-**保留旧配置的说明**：HOST=0.0.0.0 和 DANGEROUSLY_DISABLE_HOST_CHECK=true 沿用了原脚本的值，未做安全调整。默认绑定 0.0.0.0 意味着局域网内任何人都能访问开发服务器，这在共享网络中有风险。建议后续评估是否改为绑定 localhost 并文档化局域网访问的替代方案。
+**安全收紧决策（评审 P1，2026-09-16）**：初版 `.env.development` 沿用了原脚本的 `HOST=0.0.0.0` 和 `DANGEROUSLY_DISABLE_HOST_CHECK=true`。评审指出：这两个变量在 Windows CMD 下原本生效，但 POSIX 下因 `set` 语义不生效；迁移到 dotenv 后会在**所有平台**生效，等于把"仅 Windows 生效的不安全配置"扩大为"全局生效"，增加局域网暴露和 DNS rebinding 风险。因此改为默认 `HOST=localhost` 并删除禁用 Host 检查的配置——本地开发不受影响，需要局域网访问时由使用者显式配置。这是"修复跨平台问题的同时不扩大安全暴露面"的收敛。测试同步断言：HOST=localhost、未设置 DANGEROUSLY_DISABLE_HOST_CHECK。
 
