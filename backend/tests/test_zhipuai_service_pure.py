@@ -96,11 +96,9 @@ class TestCategoryName(unittest.TestCase):
         # 限定作用域置空密钥（自动恢复），强制走 client=None 离线分支
         cls._patcher = patch.dict(os.environ, {"ZHIPUAI_API_KEY": ""})
         cls._patcher.start()
+        # 注册清理：即使下面构造服务抛异常也会自动停止补丁，避免遗留环境变量修改
+        cls.addClassCleanup(cls._patcher.stop)
         cls.svc = ZhipuAIService()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._patcher.stop()
 
     def test_known_categories(self):
         self.assertEqual(self.svc._get_category_name("savings"), "储蓄能力")
@@ -119,11 +117,8 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def setUpClass(cls):
         cls._patcher = patch.dict(os.environ, {"ZHIPUAI_API_KEY": ""})
         cls._patcher.start()
+        cls.addClassCleanup(cls._patcher.stop)
         cls.svc = ZhipuAIService()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._patcher.stop()
 
     def test_no_results_returns_base_prompt(self):
         p = self.svc._build_system_prompt(None)
