@@ -18,6 +18,11 @@ cd backend
 python -m unittest tests.test_zhipuai_service_pure -v
 ```
 
+> 运行依赖：测试框架本身是标准库 `unittest`（零新增依赖），但被测模块
+> `app.services.zhipuai_service` 顶部 `from zhipuai import ZhipuAI`，因此需在
+> 已安装后端依赖的环境（仓库 `.venv`，见 `backend/requirements.txt`）下运行；
+> 测试不读取真实密钥、不发起网络请求。
+
 ## 覆盖范围
 
 | 模块 | 锁定的纯函数 | 说明 |
@@ -79,7 +84,7 @@ re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
 - `re.IGNORECASE`：让标签匹配不区分大小写，兼容 `<THINK>`/`<Think>` 等模型变体，堵住推理泄漏。
 
 ### 当前用例覆盖的边界
-单行/多行 think 块、多个 think 块、大小写变体、无标签 Markdown 原样保留、块删除后连续空行压缩为单空行、首尾空白被 strip、普通单词 `thinking` 不误伤。
+单行/多行 think 块、多个 think 块、全大写与混合大小写（含起止标签大小写不一致 + 跨行，如 `<ThInK>行1\n行2</tHiNk>正文`）、无标签 Markdown 原样保留、块删除后连续空行压缩为单空行、首尾空白被 strip、相似标签 `<thinking>...</thinking>` 不误删。
 
 ## 约定
 

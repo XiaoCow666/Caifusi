@@ -67,6 +67,16 @@ class TestFilterThinkingTags(unittest.TestCase):
             filter_thinking_tags("<Think>reasoning</Think>answer"),
             "answer",
         )
+        # 起止标签大小写不一致 + 块内跨行
+        self.assertEqual(
+            filter_thinking_tags("<ThInK>行1\n行2</tHiNk>正文"),
+            "正文",
+        )
+        # 相似标签 <thinking> 不应被误删（模式要求 think 后紧跟 >，标签名是 thinking）
+        self.assertEqual(
+            filter_thinking_tags("<thinking>普通内容</thinking>"),
+            "<thinking>普通内容</thinking>",
+        )
         # 不应误伤普通文本里的 "thinking" 字样（标签要求 think 后紧跟 >）
         self.assertIn("thinking", filter_thinking_tags("this is thinking text"))
 
