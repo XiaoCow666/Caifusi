@@ -10,7 +10,8 @@ def filter_thinking_tags(text):
     过滤掉文本中的<think>...</think>标签及其内容
     保持Markdown格式不变
     """
-    # 使用非贪婪匹配来移除<think>...</think>和任何嵌套的标签
+    # 非贪婪匹配，删除一对 <think>...</think> 及其内容（DOTALL 允许块内换行，
+    # IGNORECASE 兼容大小写变体）；注意：非贪婪匹配不支持 <think> 内再嵌套 <think>。
     filtered_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
     # 移除可能存在的空行（连续多个换行符）
